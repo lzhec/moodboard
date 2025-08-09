@@ -246,18 +246,20 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     const geo = mesh.geometry as THREE.BufferGeometry;
     const posAttr = geo.attributes['position'] as THREE.BufferAttribute;
 
-    // Индексы углов плоскости (PlaneGeometry с segments=10, вершины идут строчно)
     const userData = geo.userData as { widthSegments: number; heightSegments: number };
-    const segmentsX = userData?.widthSegments + 1 || 11; // default 10+1
+    const segmentsX = userData?.widthSegments + 1 || 11;
     const segmentsY = userData?.heightSegments + 1 || 11;
 
-    // 4 угла: индексы вершин
+    // Индексы 4 углов
     const cornerIndices = [
       0,                           // верхний левый
       segmentsX - 1,               // верхний правый
-      segmentsX * (segmentsY - 1), // нижний левый
-      segmentsX * segmentsY - 1    // нижний правый
+      segmentsX * segmentsY - 1,   // нижний правый
+      segmentsX * (segmentsY - 1)  // нижний левый
     ];
+
+    // Чистим массив
+    this.cornerSpheres = [];
 
     for (let i = 0; i < 4; i++) {
       const idx = cornerIndices[i];
@@ -265,7 +267,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       const y = posAttr.getY(idx);
       const localPos = new THREE.Vector3(x, y, 0);
 
-      // Преобразуем локальные координаты в мировые
       const worldPos = localPos.clone().applyMatrix4(mesh.matrixWorld);
 
       const sphere = new THREE.Mesh(
@@ -275,9 +276,11 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       sphere.position.copy(worldPos);
       sphere.userData['cornerIndex'] = i;
 
-      // Добавляем сферу напрямую в сцену, а не в меш
+      // Добавляем сферу в сцену
       this.scene.add(sphere);
       this.cornerSpheres.push(sphere);
+
+      console.log(`Corner sphere #${i} position (world):`, sphere.position.toArray());
     }
   }
 

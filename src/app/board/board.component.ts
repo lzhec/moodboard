@@ -1,7 +1,9 @@
-import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
+import {
+  Component, ElementRef, ViewChild, AfterViewInit, OnDestroy
+} from '@angular/core';
+
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import { TransformControls } from 'three/examples/jsm/controls/TransformControls';
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
 @Component({
   selector: 'app-board',
@@ -9,244 +11,348 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
   styleUrls: ['./board.component.scss']
 })
 export class BoardComponent implements AfterViewInit, OnDestroy {
-  @ViewChild('canvasWrap', { static: true }) canvasWrap!: ElementRef<HTMLDivElement>;
-  @ViewChild('fileInput', { static: false }) fileInput!: ElementRef<HTMLInputElement>;
+
+  @ViewChild('canvasWrapper', { static: true }) canvasWrapper!: ElementRef<HTMLDivElement>;
 
   private scene!: THREE.Scene;
-  private camera!: THREE.PerspectiveCamera;
+  private camera!: THREE.OrthographicCamera;
   private renderer!: THREE.WebGLRenderer;
-  private orbit!: OrbitControls;
-  private transform!: TransformControls;
-  private items!: THREE.Group;
+  private transformControls!: TransformControls;
 
-  private planeMesh: THREE.Mesh | null = null;
-  private planeGeoOrig: THREE.BufferGeometry | null = null;
+
+  meshes: THREE.Mesh[] = [];
+  selectedMesh: THREE.Mesh | null = null;
+
+  tool: 'move' | 'scale' | 'rotate' | 'distort' = 'move';
+
+  // Для дисторшна
   private cornerSpheres: THREE.Mesh[] = [];
-  private draggingHandle: THREE.Mesh | null = null;
+  private draggingCorner: THREE.Mesh | null = null;
+  private raycaster = new THREE.Raycaster();
+  private mouse = new THREE.Vector2();
   private dragOffset = new THREE.Vector3();
 
-  mode: 'select' | 'distort' = 'select';
+  private isDragging = false;
 
   ngAfterViewInit(): void {
     this.initThree();
-    this.loadSample();
+    this.animate();
     window.addEventListener('resize', this.onResize);
   }
 
   ngOnDestroy(): void {
     window.removeEventListener('resize', this.onResize);
-    this.disposeAll();
+    this.dispose();
   }
 
   private initThree() {
-    const wrap = this.canvasWrap.nativeElement;
+    const width = this.canvasWrapper.nativeElement.clientWidth;
+    const height = this.canvasWrapper.nativeElement.clientHeight;
+
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x222222);
-    this.camera = new THREE.PerspectiveCamera(45, wrap.clientWidth / wrap.clientHeight, 0.1, 2000);
-    this.camera.position.set(0, 100, 250);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(window.devicePixelRatio);
-    this.renderer.setSize(wrap.clientWidth, wrap.clientHeight);
-    wrap.appendChild(this.renderer.domElement);
+    this.camera = new THREE.OrthographicCamera(0, width, height, 0, -1000, 1000);
+    this.camera.position.z = 10;
 
-    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
-    dir.position.set(0.5, 1, 0.5);
-    this.scene.add(dir);
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    this.renderer.setSize(width, height);
+    this.canvasWrapper.nativeElement.appendChild(this.renderer.domElement);
 
-    const grid = new THREE.GridHelper(1000, 40, 0x444444, 0x333333);
-    grid.rotation.x = Math.PI / 2;
-    grid.position.y = -1;
-    this.scene.add(grid);
-
-    this.orbit = new OrbitControls(this.camera, this.renderer.domElement);
-    this.orbit.enableDamping = true;
-
-    this.items = new THREE.Group();
-    this.scene.add(this.items);
-
-    this.transform = new TransformControls(this.camera, this.renderer.domElement);
-    this.transform.addEventListener('dragging-changed', (e: any) => { this.orbit.enabled = !e.value; });
-    this.scene.add(this.transform as unknown as THREE.Object3D);
+    // TransformControls
+    this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
+    this.transformControls.addEventListener('dragging-changed', (event) => {
+      this.isDragging = !!event.value;
+    });
+    this.scene.add(this.transformControls.getHelper());
 
     this.setupInteraction();
-    this.animate();
   }
 
   private setupInteraction() {
     const dom = this.renderer.domElement;
-    const ray = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
+    dom.style.touchAction = 'none';
 
-    const handleMaterial = new THREE.MeshStandardMaterial({ color: 0xffaa00 });
-    const handleGeom = new THREE.SphereGeometry(3, 12, 12);
+    dom.addEventListener('pointerdown', this.onPointerDown);
+    window.addEventListener('pointermove', this.onPointerMove);
+    window.addEventListener('pointerup', this.onPointerUp);
+  }
 
-    const getMouse = (e: PointerEvent) => {
-      const rect = dom.getBoundingClientRect();
-      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = - ((e.clientY - rect.top) / rect.height) * 2 + 1;
-    };
+  private removeInteraction() {
+    const dom = this.renderer.domElement;
+    dom.removeEventListener('pointerdown', this.onPointerDown);
+    window.removeEventListener('pointermove', this.onPointerMove);
+    window.removeEventListener('pointerup', this.onPointerUp);
+  }
 
-    dom.addEventListener('pointerdown', (e: PointerEvent) => {
-      if (this.mode !== 'distort') return;
-      getMouse(e as PointerEvent);
-      ray.setFromCamera(mouse, this.camera);
-      const intersects = ray.intersectObjects(this.cornerSpheres, false);
+  private onPointerDown = (event: PointerEvent) => {
+    if (this.isDragging || this.transformControls.dragging) {
+      // Трансформация в процессе — игнорируем выбор
+      return;
+    }
+
+    if (this.tool !== 'distort') {
+      // Если включен инструмент move/scale/rotate, то выбираем меш только если клик не по контролу
+      if (this.transformControls.dragging) return; // игнорируем если контролы захватывают событие
+    }
+
+    if (this.tool === 'distort' && this.selectedMesh) {
+      this.updateMouse(event);
+      this.raycaster.setFromCamera(this.mouse, this.camera);
+      const intersects = this.raycaster.intersectObjects(this.cornerSpheres);
       if (intersects.length > 0) {
-        this.draggingHandle = intersects[0].object as THREE.Mesh;
-        this.dragOffset.copy(intersects[0].point).sub(this.draggingHandle.position);
-        this.orbit.enabled = false;
+        this.draggingCorner = intersects[0].object as THREE.Mesh;
+        this.dragOffset.copy(intersects[0].point).sub(this.draggingCorner.position);
+        return;
       }
-    });
+    }
 
-    window.addEventListener('pointermove', (e) => {
-      if (!this.draggingHandle) return;
-      getMouse(e as PointerEvent);
-      ray.setFromCamera(mouse, this.camera);
-      const plane = new THREE.Plane();
-      plane.setFromNormalAndCoplanarPoint(this.camera.getWorldDirection(new THREE.Vector3()), this.draggingHandle.position);
+    // Если не дисторшн, кликаем по слоям для выбора
+    this.updateMouse(event);
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+    const intersects = this.raycaster.intersectObjects(this.meshes.slice().reverse()); // Сверху вниз
+    if (intersects.length > 0) {
+      this.selectMesh(intersects[0].object as THREE.Mesh);
+    } else {
+      this.selectMesh(null);
+    }
+  }
+
+  private onPointerMove = (event: PointerEvent) => {
+    if (this.tool === 'distort' && this.draggingCorner) {
+      this.updateMouse(event);
+      this.raycaster.setFromCamera(this.mouse, this.camera);
+
+      const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
       const intersectPoint = new THREE.Vector3();
-      ray.ray.intersectPlane(plane, intersectPoint);
-      if (intersectPoint) {
-        const newPos = intersectPoint.sub(this.dragOffset);
-        this.draggingHandle.position.copy(newPos);
-        this.updatePlaneFromHandles();
-      }
+      this.raycaster.ray.intersectPlane(plane, intersectPoint);
+
+      if (!intersectPoint) return;
+      const newPos = intersectPoint.sub(this.dragOffset);
+
+      this.draggingCorner.position.copy(newPos);
+      this.updateDistort();
+    }
+  }
+
+  private onPointerUp = () => {
+    this.draggingCorner = null;
+  }
+
+  private updateMouse(event: PointerEvent) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  }
+
+  onFilesSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (!input.files) return;
+
+    Array.from(input.files).forEach(file => {
+      const url = URL.createObjectURL(file);
+      new THREE.TextureLoader().load(url, (texture) => {
+        this.addImageLayer(texture, file.name);
+        URL.revokeObjectURL(url);
+      });
     });
-
-    window.addEventListener('pointerup', () => {
-      if (this.draggingHandle) { this.draggingHandle = null; this.orbit.enabled = true; }
-    });
-
-    dom.addEventListener('pointerdown', (e: PointerEvent) => {
-      if (this.mode === 'distort') return;
-      if ((e as PointerEvent).button !== 0) return;
-      getMouse(e as PointerEvent);
-      ray.setFromCamera(mouse, this.camera);
-      const intersects = this.planeMesh ? ray.intersectObject(this.planeMesh) : [];
-      if ((intersects as any).length > 0) { this.transform.attach(this.planeMesh!); } else { this.transform.detach(); }
-    });
-
-    // store utilities on `this` so other methods can use
-    (this as any)._ray = ray;
-    (this as any)._mouse = mouse;
-    (this as any)._handleGeom = handleGeom;
-    (this as any)._handleMaterial = handleMaterial;
-  }
-
-  private createPlane(texture: THREE.Texture) {
-    // cleanup previous
-    if (this.planeMesh) {
-      this.items.remove(this.planeMesh);
-      this.planeMesh.geometry.dispose();
-      (this.planeMesh.material as THREE.Material).dispose();
-      this.cornerSpheres.forEach(s => { this.scene.remove(s); s.geometry.dispose(); });
-      this.cornerSpheres.length = 0;
-    }
-
-    const geo = new THREE.PlaneGeometry(100, 100, 1, 1);
-    this.planeGeoOrig = geo.clone();
-    const mat = new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide });
-    this.planeMesh = new THREE.Mesh(geo, mat);
-    this.planeMesh.position.set(0, 50, 0);
-    this.planeMesh.rotation.x = -Math.PI / 2 + 0.001;
-    this.items.add(this.planeMesh);
-
-    const verts = this.planeMesh.geometry.attributes['position'];
-    for (let i = 0; i < 4; i++) {
-      const vx = verts.getX(i);
-      const vy = verts.getY(i);
-      const vz = verts.getZ(i);
-      const s = new THREE.Mesh((this as any)._handleGeom, (this as any)._handleMaterial.clone());
-      s.position.set(vx, vy, vz).applyMatrix4(this.planeMesh.matrixWorld);
-      s.userData['cornerIndex'] = i;
-      this.scene.add(s);
-      this.cornerSpheres.push(s);
-    }
-
-    this.transform.attach(this.planeMesh);
-  }
-
-  private updateHandlesFromPlane() {
-    if (!this.planeMesh) return;
-    const pos = this.planeMesh.geometry.attributes['position'];
-    for (let i = 0; i < 4; i++) {
-      const local = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
-      const world = local.clone().applyMatrix4(this.planeMesh.matrixWorld);
-      this.cornerSpheres[i].position.copy(world);
-    }
-  }
-
-  private updatePlaneFromHandles() {
-    if (!this.planeMesh) return;
-    const pos = this.planeMesh.geometry.attributes['position'];
-    for (let i = 0; i < 4; i++) {
-      const world = this.cornerSpheres[i].position.clone();
-      const local = world.applyMatrix4(new THREE.Matrix4().copy(this.planeMesh.matrixWorld).invert());
-      pos.setXYZ(i, local.x, local.y, local.z);
-    }
-    pos.needsUpdate = true;
-    this.planeMesh.geometry.computeVertexNormals();
-  }
-
-  setMode(m: 'select' | 'distort') {
-    this.mode = m;
-    this.cornerSpheres.forEach(s => s.visible = (m === 'distort'));
-    this.transform.enabled = (m === 'select');
-    this.orbit.enabled = true;
-  }
-
-  flip(axis: 'x' | 'y') {
-    if (!this.planeMesh) return;
-    if (axis === 'x') this.planeMesh.scale.x *= -1; else this.planeMesh.scale.y *= -1;
-  }
-
-  async loadSample() {
-    const url = 'https://images.unsplash.com/photo-1519710164239-da123dc03ef4?w=1600&q=80';
-    await this.loadTexture(url);
-  }
-
-  async onFile(ev: Event) {
-    const input = ev.target as HTMLInputElement;
-    const f = input.files && input.files[0];
-    if (!f) return;
-    const url = URL.createObjectURL(f);
-    await this.loadTexture(url);
-    URL.revokeObjectURL(url);
     input.value = '';
   }
 
-  private loadTexture(url: string) {
-    return new Promise<void>((resolve, reject) => {
-      new THREE.TextureLoader().load(url, (tex) => {
-        tex.needsUpdate = true;
-        this.createPlane(tex);
-        this.cornerSpheres.forEach(s => s.visible = (this.mode === 'distort'));
-        this.updateHandlesFromPlane();
-        resolve();
-      }, undefined, reject);
+  private addImageLayer(texture: THREE.Texture, name?: string) {
+    const wrap = this.canvasWrapper.nativeElement;
+    const w = wrap.clientWidth / 3;
+    const h = wrap.clientHeight / 3;
+
+    const geo = new THREE.PlaneGeometry(w, h, 1, 1);
+    const mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(wrap.clientWidth / 2, wrap.clientHeight / 2, this.meshes.length * 10);
+    mesh.userData['name'] = name || 'Image';
+    this.scene.add(mesh);
+
+    this.meshes.push(mesh);
+    this.selectMesh(mesh);
+  }
+
+  selectMesh(mesh: THREE.Mesh | null) {
+    if (this.selectedMesh === mesh) return;
+
+    // Снять предыдущие контролы и углы
+    this.clearTransform();
+    this.selectedMesh = mesh;
+
+    if (mesh) {
+      if (this.tool === 'distort') {
+        this.initDistort(mesh);
+      } else {
+        this.initTransform(mesh);
+      }
+    }
+  }
+
+  private clearTransform() {
+    this.transformControls.detach();
+    this.clearDistort();
+  }
+
+  private initTransform(mesh: THREE.Mesh) {
+    this.clearDistort();
+    this.transformControls.attach(mesh);
+
+    switch (this.tool) {
+      case 'move': this.transformControls.setMode('translate'); break;
+      case 'scale': this.transformControls.setMode('scale'); break;
+      case 'rotate': this.transformControls.setMode('rotate'); break;
+    }
+  }
+
+  private initDistort(mesh: THREE.Mesh) {
+    this.transformControls.detach();
+    this.createDistortHandles(mesh);
+  }
+
+  private createDistortHandles(mesh: THREE.Mesh) {
+    this.clearDistort();
+    // Создаем 4 угловых сферы, позиционируем по углам геометрии
+
+    const geo = mesh.geometry as THREE.BufferGeometry;
+    const posAttr = geo.attributes['position'] as THREE.BufferAttribute;
+
+    // Вершины плоскости
+    // Инициализируем углы по позиции вершин геометрии в мировых координатах
+    for (let i = 0; i < 4; i++) {
+      const x = posAttr.getX(i);
+      const y = posAttr.getY(i);
+      const localPos = new THREE.Vector3(x, y, 0);
+      const worldPos = localPos.applyMatrix4(mesh.matrixWorld);
+
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(10, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0xffaa00 })
+      );
+      sphere.position.copy(worldPos);
+      sphere.userData['cornerIndex'] = i;
+      this.scene.add(sphere);
+      this.cornerSpheres.push(sphere);
+    }
+  }
+
+  private clearDistort() {
+    this.cornerSpheres.forEach(s => {
+      this.scene.remove(s);
+      s.geometry.dispose();
+      (s.material as THREE.Material).dispose();
     });
+    this.cornerSpheres = [];
+  }
+
+  private updateDistort() {
+    if (!this.selectedMesh || this.cornerSpheres.length !== 4) return;
+    const geo = this.selectedMesh.geometry as THREE.BufferGeometry;
+    const posAttr = geo.attributes['position'] as THREE.BufferAttribute;
+
+    // cornerSpheres: [0..3] — мир координаты углов, нужно преобразовать в локальные координаты mesh
+    for (let i = 0; i < 4; i++) {
+      const sphere = this.cornerSpheres[i];
+      const localPos = sphere.position.clone();
+      this.selectedMesh.worldToLocal(localPos);
+      posAttr.setXYZ(i, localPos.x, localPos.y, localPos.z);
+    }
+    posAttr.needsUpdate = true;
+    geo.computeVertexNormals();
+  }
+
+  setTool(tool: 'move' | 'scale' | 'rotate' | 'distort') {
+    if (this.tool === tool) return;
+    this.tool = tool;
+    if (this.selectedMesh) {
+      if (tool === 'distort') {
+        this.initDistort(this.selectedMesh);
+      } else {
+        this.initTransform(this.selectedMesh);
+      }
+    } else {
+      this.transformControls.detach();
+      this.clearDistort();
+    }
+  }
+
+  flipSelected(axis: 'x' | 'y') {
+    if (!this.selectedMesh) return;
+    if (axis === 'x') this.selectedMesh.scale.x *= -1;
+    else this.selectedMesh.scale.y *= -1;
+  }
+
+  deleteSelected() {
+    if (!this.selectedMesh) return;
+
+    this.clearTransform();
+    this.scene.remove(this.selectedMesh);
+    const index = this.meshes.indexOf(this.selectedMesh);
+    if (index >= 0) this.meshes.splice(index, 1);
+
+    this.selectedMesh = null;
+  }
+
+  moveLayerUp() {
+    if (!this.selectedMesh) return;
+    const index = this.meshes.indexOf(this.selectedMesh);
+    if (index < this.meshes.length - 1) {
+      this.swapLayers(index, index + 1);
+    }
+  }
+
+  moveLayerDown() {
+    if (!this.selectedMesh) return;
+    const index = this.meshes.indexOf(this.selectedMesh);
+    if (index > 0) {
+      this.swapLayers(index, index - 1);
+    }
+  }
+
+  private swapLayers(i1: number, i2: number) {
+    const m1 = this.meshes[i1];
+    const m2 = this.meshes[i2];
+
+    // Меняем z-позиции (слой)
+    const tempZ = m1.position.z;
+    m1.position.z = m2.position.z;
+    m2.position.z = tempZ;
+
+    // Меняем местами в массиве
+    this.meshes[i1] = m2;
+    this.meshes[i2] = m1;
   }
 
   private animate = () => {
     requestAnimationFrame(this.animate);
-    this.orbit.update();
-    this.updateHandlesFromPlane();
     this.renderer.render(this.scene, this.camera);
   }
 
   private onResize = () => {
-    const wrap = this.canvasWrap.nativeElement;
-    this.camera.aspect = wrap.clientWidth / wrap.clientHeight;
+    const w = this.canvasWrapper.nativeElement.clientWidth;
+    const h = this.canvasWrapper.nativeElement.clientHeight;
+    this.camera.left = 0;
+    this.camera.right = w;
+    this.camera.top = h;
+    this.camera.bottom = 0;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+    this.renderer.setSize(w, h);
   }
 
-  private disposeAll() {
+  private dispose() {
+    this.removeInteraction();
+    this.transformControls.dispose();
+    this.meshes.forEach(m => {
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
+      this.scene.remove(m);
+    });
+    this.meshes = [];
+    this.clearDistort();
     if (this.renderer) {
       this.renderer.dispose();
-      (this.renderer.domElement.parentNode as any)?.removeChild(this.renderer.domElement);
+      this.canvasWrapper.nativeElement.removeChild(this.renderer.domElement);
     }
   }
 }

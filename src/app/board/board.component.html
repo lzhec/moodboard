@@ -1,26 +1,42 @@
-<div class="wrap">
-  <div class="toolbar">
-    <button (click)="setMode('select')" [class.active]="mode === 'select'">
-      Select / Transform
-    </button>
-    <button (click)="setMode('distort')" [class.active]="mode === 'distort'">
-      Distort (mesh)
-    </button>
-    <button (click)="flip('x')">Flip X</button>
-    <button (click)="flip('y')">Flip Y</button>
-    <button (click)="loadSample()">Load sample</button>
-    <button (click)="fileInput.click()">Upload image</button>
-    <input
-      #fileInput
-      type="file"
-      accept="image/*"
-      (change)="onFile($event)"
-      style="display: none"
-    />
-  </div>
-  <div class="canvas-wrap" #canvasWrap></div>
-  <div class="hint">
-    Orbit: right-drag / middle-drag. Select: left-click. Drag corner spheres to
-    distort.
-  </div>
+<div class="toolbar">
+  <input
+    type="file"
+    multiple
+    accept="image/*"
+    (change)="onFilesSelected($event)"
+  />
+  <button (click)="setTool('move')" [class.active]="tool === 'move'">
+    Move
+  </button>
+  <button (click)="setTool('scale')" [class.active]="tool === 'scale'">
+    Scale
+  </button>
+  <button (click)="setTool('rotate')" [class.active]="tool === 'rotate'">
+    Rotate
+  </button>
+  <button (click)="flipSelected('x')">Flip X</button>
+  <button (click)="flipSelected('y')">Flip Y</button>
+  <button (click)="setTool('distort')" [class.active]="tool === 'distort'">
+    Distort
+  </button>
+  <button (click)="deleteSelected()" [disabled]="!selectedMesh">Delete</button>
+  <button (click)="moveLayerUp()" [disabled]="!selectedMesh">Layer Up</button>
+  <button (click)="moveLayerDown()" [disabled]="!selectedMesh">
+    Layer Down
+  </button>
+</div>
+
+<div #canvasWrapper class="canvas-wrapper"></div>
+
+<div class="layers-list">
+  <h3>Layers</h3>
+  <ul>
+    <li
+      *ngFor="let m of meshes; let i = index"
+      [class.selected]="m === selectedMesh"
+      (click)="selectMesh(m)"
+    >
+      Layer {{ i + 1 }} - {{ m.userData["name"] || "Image" }}
+    </li>
+  </ul>
 </div>

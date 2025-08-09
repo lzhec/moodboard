@@ -279,8 +279,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       // Добавляем сферу в сцену
       this.scene.add(sphere);
       this.cornerSpheres.push(sphere);
-
-      console.log(`Corner sphere #${i} position (world):`, sphere.position.toArray());
     }
   }
 

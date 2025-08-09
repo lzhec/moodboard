@@ -85,51 +85,45 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   }
 
   private onPointerDown = (event: PointerEvent) => {
-    if (this.isDragging || this.transformControls.dragging) {
-      // Трансформация в процессе — игнорируем выбор
-      return;
-    }
-
-    if (this.tool !== 'distort') {
-      // Если включен инструмент move/scale/rotate, то выбираем меш только если клик не по контролу
-      if (this.transformControls.dragging) return; // игнорируем если контролы захватывают событие
-    }
-
     if (this.tool === 'distort' && this.selectedMesh) {
       this.updateMouse(event);
       this.raycaster.setFromCamera(this.mouse, this.camera);
       const intersects = this.raycaster.intersectObjects(this.cornerSpheres);
+
       if (intersects.length > 0) {
         this.draggingCorner = intersects[0].object as THREE.Mesh;
-        this.dragOffset.copy(intersects[0].point).sub(this.draggingCorner.position);
+
+        // При клике оффсет тоже надо в локальных координатах!
+        const intersectPoint = intersects[0].point.clone();
+        const localIntersect = this.selectedMesh.worldToLocal(intersectPoint);
+
+        this.dragOffset.copy(localIntersect).sub(this.draggingCorner.position);
+
         return;
       }
-    }
-
-    // Если не дисторшн, кликаем по слоям для выбора
-    this.updateMouse(event);
-    this.raycaster.setFromCamera(this.mouse, this.camera);
-    const intersects = this.raycaster.intersectObjects(this.meshes.slice().reverse()); // Сверху вниз
-    if (intersects.length > 0) {
-      this.selectMesh(intersects[0].object as THREE.Mesh);
-    } else {
-      this.selectMesh(null);
     }
   }
 
   private onPointerMove = (event: PointerEvent) => {
-    if (this.tool === 'distort' && this.draggingCorner) {
+    if (this.tool === 'distort' && this.draggingCorner && this.selectedMesh) {
       this.updateMouse(event);
       this.raycaster.setFromCamera(this.mouse, this.camera);
 
       const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
       const intersectPoint = new THREE.Vector3();
-      this.raycaster.ray.intersectPlane(plane, intersectPoint);
 
-      if (!intersectPoint) return;
-      const newPos = intersectPoint.sub(this.dragOffset);
+      if (!this.raycaster.ray.intersectPlane(plane, intersectPoint)) return;
 
-      this.draggingCorner.position.copy(newPos);
+      // Преобразуем мировую точку в локальные координаты меша
+      const localPos = this.selectedMesh.worldToLocal(intersectPoint.clone());
+
+      // Вычитаем оффсет (в локальных координатах, лучше пересчитывать dragOffset тоже локально при pointerdown)
+      const newLocalPos = localPos.sub(this.dragOffset);
+
+      newLocalPos.z = 0; // чтобы плоскость оставалась XY
+
+      this.draggingCorner.position.copy(newLocalPos);
+
       this.updateDistort();
     }
   }
@@ -162,8 +156,15 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     const wrap = this.canvasWrapper.nativeElement;
     const w = wrap.clientWidth / 3;
     const h = wrap.clientHeight / 3;
+    const segments = 10;
+    const geo = new THREE.PlaneGeometry(w, h, segments, segments);
 
-    const geo = new THREE.PlaneGeometry(w, h, 1, 1);
+    // Сохраняем параметры, чтобы потом использовать
+    geo.userData = {
+      widthSegments: segments,
+      heightSegments: segments
+    };
+
     const mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(wrap.clientWidth / 2, wrap.clientHeight / 2, this.meshes.length * 10);
@@ -204,6 +205,32 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       case 'scale': this.transformControls.setMode('scale'); break;
       case 'rotate': this.transformControls.setMode('rotate'); break;
     }
+
+    // Ограничения для 2D:
+    this.transformControls.showX = true;
+    this.transformControls.showY = true;
+    this.transformControls.showZ = false;
+
+    // Сброс z позиции, ротации и масштаба по Z при трансформации:
+    this.transformControls.addEventListener('objectChange', () => {
+      if (!this.selectedMesh) return;
+
+      if (this.tool === 'move') {
+        // Фиксируем позицию по Z
+        this.selectedMesh.position.z = 0;
+      }
+
+      if (this.tool === 'rotate') {
+        // Фиксируем вращение только вокруг Z
+        this.selectedMesh.rotation.x = 0;
+        this.selectedMesh.rotation.y = 0;
+      }
+
+      if (this.tool === 'scale') {
+        // Фиксируем масштаб по Z
+        this.selectedMesh.scale.z = 1;
+      }
+    });
   }
 
   private initDistort(mesh: THREE.Mesh) {
@@ -213,18 +240,33 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
   private createDistortHandles(mesh: THREE.Mesh) {
     this.clearDistort();
-    // Создаем 4 угловых сферы, позиционируем по углам геометрии
+
+    mesh.updateMatrixWorld(true);
 
     const geo = mesh.geometry as THREE.BufferGeometry;
     const posAttr = geo.attributes['position'] as THREE.BufferAttribute;
 
-    // Вершины плоскости
-    // Инициализируем углы по позиции вершин геометрии в мировых координатах
+    // Индексы углов плоскости (PlaneGeometry с segments=10, вершины идут строчно)
+    const userData = geo.userData as { widthSegments: number; heightSegments: number };
+    const segmentsX = userData?.widthSegments + 1 || 11; // default 10+1
+    const segmentsY = userData?.heightSegments + 1 || 11;
+
+    // 4 угла: индексы вершин
+    const cornerIndices = [
+      0,                           // верхний левый
+      segmentsX - 1,               // верхний правый
+      segmentsX * (segmentsY - 1), // нижний левый
+      segmentsX * segmentsY - 1    // нижний правый
+    ];
+
     for (let i = 0; i < 4; i++) {
-      const x = posAttr.getX(i);
-      const y = posAttr.getY(i);
+      const idx = cornerIndices[i];
+      const x = posAttr.getX(idx);
+      const y = posAttr.getY(idx);
       const localPos = new THREE.Vector3(x, y, 0);
-      const worldPos = localPos.applyMatrix4(mesh.matrixWorld);
+
+      // Преобразуем локальные координаты в мировые
+      const worldPos = localPos.clone().applyMatrix4(mesh.matrixWorld);
 
       const sphere = new THREE.Mesh(
         new THREE.SphereGeometry(10, 8, 8),
@@ -232,6 +274,8 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       );
       sphere.position.copy(worldPos);
       sphere.userData['cornerIndex'] = i;
+
+      // Добавляем сферу напрямую в сцену, а не в меш
       this.scene.add(sphere);
       this.cornerSpheres.push(sphere);
     }
@@ -251,12 +295,33 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     const geo = this.selectedMesh.geometry as THREE.BufferGeometry;
     const posAttr = geo.attributes['position'] as THREE.BufferAttribute;
 
-    // cornerSpheres: [0..3] — мир координаты углов, нужно преобразовать в локальные координаты mesh
-    for (let i = 0; i < 4; i++) {
-      const sphere = this.cornerSpheres[i];
-      const localPos = sphere.position.clone();
-      this.selectedMesh.worldToLocal(localPos);
-      posAttr.setXYZ(i, localPos.x, localPos.y, localPos.z);
+    // Четыре угла — сферы в мировой системе
+    const c0 = this.cornerSpheres[0].position;
+    const c1 = this.cornerSpheres[1].position;
+    const c2 = this.cornerSpheres[2].position;
+    const c3 = this.cornerSpheres[3].position;
+
+    const userData: { widthSegments: number; heightSegments: number } = geo.userData as { widthSegments: number; heightSegments: number };
+    const segmentsX = userData.widthSegments + 1;
+    const segmentsY = userData.heightSegments + 1;
+
+    // Получаем позицию меша
+    const meshPos = this.selectedMesh.position;
+
+    for (let y = 0; y < segmentsY; y++) {
+      const t = y / (segmentsY - 1);
+      const left = new THREE.Vector3().lerpVectors(c0, c3, t);
+      const right = new THREE.Vector3().lerpVectors(c1, c2, t);
+
+      for (let x = 0; x < segmentsX; x++) {
+        const s = x / (segmentsX - 1);
+        const posWorld = new THREE.Vector3().lerpVectors(left, right, s);
+
+        // Переводим из мировой системы в локальную (позиция вершины относительно меша)
+        const posLocal = posWorld.clone().sub(meshPos);
+
+        posAttr.setXYZ(y * segmentsX + x, posLocal.x, posLocal.y, posLocal.z);
+      }
     }
     posAttr.needsUpdate = true;
     geo.computeVertexNormals();

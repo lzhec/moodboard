@@ -1,0 +1,26 @@
+<div class="wrap">
+  <div class="toolbar">
+    <button (click)="setMode('select')" [class.active]="mode === 'select'">
+      Select / Transform
+    </button>
+    <button (click)="setMode('distort')" [class.active]="mode === 'distort'">
+      Distort (mesh)
+    </button>
+    <button (click)="flip('x')">Flip X</button>
+    <button (click)="flip('y')">Flip Y</button>
+    <button (click)="loadSample()">Load sample</button>
+    <button (click)="fileInput.click()">Upload image</button>
+    <input
+      #fileInput
+      type="file"
+      accept="image/*"
+      (change)="onFile($event)"
+      style="display: none"
+    />
+  </div>
+  <div class="canvas-wrap" #canvasWrap></div>
+  <div class="hint">
+    Orbit: right-drag / middle-drag. Select: left-click. Drag corner spheres to
+    distort.
+  </div>
+</div>

@@ -340,11 +340,19 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
           const imgWidth = texture.image.width;
           const imgHeight = texture.image.height;
+          const segments = 10;
 
-          const geometry = new THREE.PlaneGeometry(imgWidth, imgHeight);
+          const geometry = new THREE.PlaneGeometry(imgWidth, imgHeight, segments, segments);
+
+          // Сохраняем параметры, чтобы потом использовать
+          geometry.userData = {
+            widthSegments: segments,
+            heightSegments: segments
+          };
 
           const material = new THREE.MeshBasicMaterial({
             map: texture,
+            side: THREE.DoubleSide,
             transparent: true
           });
 
@@ -366,6 +374,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     this.scene.add(mesh);
     this.meshes.push(mesh);
+    this.selectMesh(mesh);
 
     this.render(); // Отрисовать сразу
   }

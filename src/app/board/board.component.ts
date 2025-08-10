@@ -33,7 +33,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private mouse = new THREE.Vector2();
   private dragOffset = new THREE.Vector3();
 
-  private isDragging = false;
+  private resizeTimeout: ReturnType<typeof setTimeout> | null = null;
 
   ngAfterViewInit(): void {
     this.initThree();
@@ -42,7 +42,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     const w = wrapper.clientWidth;
     const h = wrapper.clientHeight;
 
-    this.renderer.setSize(w, h, false); // один раз
     this.updateCamera(w, h);
 
     window.addEventListener('resize', this.onResize);
@@ -69,15 +68,32 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     // TransformControls
     this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
+
+    // Добавляем слушатели один раз
     this.transformControls.addEventListener('dragging-changed', (event) => {
-      this.isDragging = !!event.value;
       // При начале или окончании перетаскивания — рендерим
       this.render();
     });
+
     this.transformControls.addEventListener('objectChange', () => {
-      // При изменении объекта (движение, масштаб, вращение)
+      if (!this.selectedMesh) return;
+
+      if (this.tool === 'move') {
+        this.selectedMesh.position.z = 0;
+      }
+
+      if (this.tool === 'rotate') {
+        this.selectedMesh.rotation.x = 0;
+        this.selectedMesh.rotation.y = 0;
+      }
+
+      if (this.tool === 'scale') {
+        this.selectedMesh.scale.z = 1;
+      }
+
       this.render();
     });
+
     this.scene.add(this.transformControls.getHelper());
 
     this.setupInteraction();
@@ -97,6 +113,31 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     dom.removeEventListener('pointerdown', this.onPointerDown);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
+  }
+
+  // Чтобы корректно удалить слушатели, сделаем их методами класса:
+
+  private onDraggingChanged = (event: any) => {
+    this.render();
+  }
+
+  private onObjectChange = () => {
+    if (!this.selectedMesh) return;
+
+    if (this.tool === 'move') {
+      this.selectedMesh.position.z = 0;
+    }
+
+    if (this.tool === 'rotate') {
+      this.selectedMesh.rotation.x = 0;
+      this.selectedMesh.rotation.y = 0;
+    }
+
+    if (this.tool === 'scale') {
+      this.selectedMesh.scale.z = 1;
+    }
+
+    this.render();
   }
 
   private onPointerDown = (event: PointerEvent) => {
@@ -225,33 +266,11 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       case 'rotate': this.transformControls.setMode('rotate'); break;
     }
 
-    // Ограничения для 2D:
     this.transformControls.showX = true;
     this.transformControls.showY = true;
     this.transformControls.showZ = false;
 
-    // Сброс z позиции, ротации и масштаба по Z при трансформации:
-    this.transformControls.addEventListener('objectChange', () => {
-      if (!this.selectedMesh) return;
-
-      if (this.tool === 'move') {
-        // Фиксируем позицию по Z
-        this.selectedMesh.position.z = 0;
-      }
-
-      if (this.tool === 'rotate') {
-        // Фиксируем вращение только вокруг Z
-        this.selectedMesh.rotation.x = 0;
-        this.selectedMesh.rotation.y = 0;
-      }
-
-      if (this.tool === 'scale') {
-        // Фиксируем масштаб по Z
-        this.selectedMesh.scale.z = 1;
-      }
-
-      this.render();
-    });
+    // Внимание: слушатель objectChange больше не добавляем здесь
   }
 
   private initDistort(mesh: THREE.Mesh) {
@@ -443,8 +462,38 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     const w = wrapper.clientWidth;
     const h = wrapper.clientHeight;
 
-    this.updateCamera(w, h);
+    this.camera.left = 0;
+    this.camera.right = w;
+    this.camera.top = h;
+    this.camera.bottom = 0;
+    this.camera.updateProjectionMatrix();
+
+    // Ограничиваем pixel ratio для предотвращения чрезмерной нагрузки
+    const maxPixelRatio = 2; // можно уменьшить, если нужно
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
+    this.renderer.setSize(w, h, false);
     this.render();
+
+    // if (this.resizeTimeout) {
+    //   clearTimeout(this.resizeTimeout);
+    // }
+
+    // this.resizeTimeout = setTimeout(() => {
+    //   const wrapper = this.canvasWrapper.nativeElement;
+    //   const w = wrapper.clientWidth;
+    //   const h = wrapper.clientHeight;
+
+    //   this.camera.left = 0;
+    //   this.camera.right = w;
+    //   this.camera.top = h;
+    //   this.camera.bottom = 0;
+    //   this.camera.updateProjectionMatrix();
+
+    //   this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    //   this.renderer.setSize(w, h, false);
+
+    //   this.render();
+    // }, 100);
   }
 
   private updateCamera(w: number, h: number) {
@@ -457,14 +506,23 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
   private dispose() {
     this.removeInteraction();
+
+    // Убираем все слушатели transformControls перед dispose
+    this.transformControls.removeEventListener('dragging-changed', this.onDraggingChanged);
+    this.transformControls.removeEventListener('objectChange', this.onObjectChange);
+
     this.transformControls.dispose();
+
     this.meshes.forEach(m => {
       m.geometry.dispose();
       (m.material as THREE.Material).dispose();
       this.scene.remove(m);
     });
+
     this.meshes = [];
+
     this.clearDistort();
+
     if (this.renderer) {
       this.renderer.dispose();
       this.canvasWrapper.nativeElement.removeChild(this.renderer.domElement);

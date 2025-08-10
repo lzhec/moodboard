@@ -34,6 +34,11 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private dragOffset = new THREE.Vector3();
 
   private resizeTimeout: ReturnType<typeof setTimeout> | null = null;
+  private isPanning = false;
+  private panStart = new THREE.Vector2();
+  private panEnd = new THREE.Vector2();
+  private panDelta = new THREE.Vector2();
+
 
   ngAfterViewInit(): void {
     this.initThree();
@@ -44,12 +49,17 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     this.updateCamera(w, h);
 
+    this.renderer.domElement.addEventListener('wheel', this.onWheel, { passive: false });
     window.addEventListener('resize', this.onResize);
     this.render();  // отрисовать первый кадр
   }
 
   ngOnDestroy(): void {
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('mousemove', this.onMouseMove);
+    window.removeEventListener('mouseup', this.onMouseUp);
+    this.renderer.domElement.removeEventListener('mousedown', this.onMouseDown);
+    this.renderer.domElement.removeEventListener('wheel', this.onWheel);
     this.dispose();
   }
 
@@ -63,7 +73,9 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.camera.position.z = 10;
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    this.renderer.setSize(width, height);
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
+    this.renderer.domElement.style.width = '100vw';
+    this.renderer.domElement.style.height = '100vh';
     this.canvasWrapper.nativeElement.appendChild(this.renderer.domElement);
 
     // TransformControls
@@ -106,6 +118,9 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     dom.addEventListener('pointerdown', this.onPointerDown);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
+    window.addEventListener('mousemove', this.onMouseMove);
+    window.addEventListener('mouseup', this.onMouseUp);
+    this.renderer.domElement.addEventListener('mousedown', this.onMouseDown);
   }
 
   private removeInteraction() {
@@ -114,6 +129,101 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
   }
+
+  private onWheel = (event: WheelEvent) => {
+    event.preventDefault();
+
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+
+    // Нормализуем координаты мыши от 0 до 1
+    const normX = mouseX / rect.width;
+    const normY = mouseY / rect.height;
+
+    // Размеры текущей камеры
+    const width = this.camera.right - this.camera.left;
+    const height = this.camera.top - this.camera.bottom;
+
+    // Текущие левые/верхние координаты камеры
+    let left = this.camera.left;
+    let bottom = this.camera.bottom;
+
+    // Масштабный фактор (чем больше - тем сильнее зум)
+    const zoomSpeed = 0.1;
+    const delta = event.deltaY * (zoomSpeed / 100);
+
+    // Ограничения масштаба
+    const minWidth = 100;
+    const maxWidth = 10000;
+
+    // Новый размер камеры
+    let newWidth = width * (1 + delta);
+    newWidth = Math.min(Math.max(newWidth, minWidth), maxWidth);
+    const newHeight = (height / width) * newWidth;
+
+    // Рассчитаем новый left и bottom так, чтобы точка под курсором осталась неподвижной
+    // Точка под курсором в мире:
+    // worldX = left + normX * width
+    // после масштабирования хотим:
+    // worldX = newLeft + normX * newWidth => newLeft = worldX - normX * newWidth
+
+    const worldX = left + normX * width;
+    const worldY = bottom + normY * height;
+
+    const newLeft = worldX - normX * newWidth;
+    const newBottom = worldY - normY * newHeight;
+
+    // Обновляем камеру
+    this.camera.left = newLeft;
+    this.camera.right = newLeft + newWidth;
+    this.camera.bottom = newBottom;
+    this.camera.top = newBottom + newHeight;
+    this.camera.updateProjectionMatrix();
+
+    this.render();
+  };
+
+  private onMouseDown = (event: MouseEvent) => {
+    // Например, срабатываем на зажатие средней кнопки мыши
+    if (event.button === 1) {
+      event.preventDefault();
+      this.isPanning = true;
+      this.panStart.set(event.clientX, event.clientY);
+    }
+  }
+
+  private onMouseMove = (event: MouseEvent) => {
+    if (!this.isPanning) return;
+
+    this.panEnd.set(event.clientX, event.clientY);
+    this.panDelta.subVectors(this.panEnd, this.panStart);
+
+    // Скорость панорамирования (настрой)
+    const panSpeed = 1;
+
+    // Поскольку у камеры ортографическая проекция, сдвигаем положение и границы камеры
+    this.camera.position.x -= this.panDelta.x * panSpeed;
+    this.camera.position.y += this.panDelta.y * panSpeed;
+
+    this.camera.left -= this.panDelta.x * panSpeed;
+    this.camera.right -= this.panDelta.x * panSpeed;
+    this.camera.top += this.panDelta.y * panSpeed;
+    this.camera.bottom += this.panDelta.y * panSpeed;
+
+    this.camera.updateProjectionMatrix();
+
+    this.panStart.copy(this.panEnd);
+
+    this.render();
+  }
+
+  private onMouseUp = (event: MouseEvent) => {
+    if (event.button === 1 && this.isPanning) {
+      this.isPanning = false;
+    }
+  }
+
 
   // Чтобы корректно удалить слушатели, сделаем их методами класса:
 
@@ -492,9 +602,23 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   }
 
   private onResize = () => {
-    const wrapper = this.canvasWrapper.nativeElement;
-    const w = wrapper.clientWidth;
-    const h = wrapper.clientHeight;
+    // const wrapper = this.canvasWrapper.nativeElement;
+    // const w = wrapper.clientWidth;
+    // const h = wrapper.clientHeight;
+
+    // this.camera.left = 0;
+    // this.camera.right = w;
+    // this.camera.top = h;
+    // this.camera.bottom = 0;
+    // this.camera.updateProjectionMatrix();
+
+    // // Ограничиваем pixel ratio для предотвращения чрезмерной нагрузки
+    // const maxPixelRatio = 2; // можно уменьшить, если нужно
+    // this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
+    // this.renderer.setSize(w, h, false);
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
 
     this.camera.left = 0;
     this.camera.right = w;
@@ -502,32 +626,50 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.camera.bottom = 0;
     this.camera.updateProjectionMatrix();
 
-    // Ограничиваем pixel ratio для предотвращения чрезмерной нагрузки
-    const maxPixelRatio = 2; // можно уменьшить, если нужно
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h, false);
+
+    this.renderer.domElement.style.width = '100vw';
+    this.renderer.domElement.style.height = '100vh';
+
     this.render();
 
-    // if (this.resizeTimeout) {
-    //   clearTimeout(this.resizeTimeout);
-    // }
+    // const wrapper = this.canvasWrapper.nativeElement;
+    // const w = wrapper.clientWidth;
+    // const h = wrapper.clientHeight;
 
-    // this.resizeTimeout = setTimeout(() => {
-    //   const wrapper = this.canvasWrapper.nativeElement;
-    //   const w = wrapper.clientWidth;
-    //   const h = wrapper.clientHeight;
+    // this.camera.left = 0;
+    // this.camera.right = w;
+    // this.camera.top = h;
+    // this.camera.bottom = 0;
+    // this.camera.updateProjectionMatrix();
 
-    //   this.camera.left = 0;
-    //   this.camera.right = w;
-    //   this.camera.top = h;
-    //   this.camera.bottom = 0;
-    //   this.camera.updateProjectionMatrix();
+    // // Ограничиваем pixel ratio для предотвращения чрезмерной нагрузки
+    // const maxPixelRatio = 2; // можно уменьшить, если нужно
+    // this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
+    // this.renderer.setSize(w, h, false);
+    // this.render();
 
-    //   this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    //   this.renderer.setSize(w, h, false);
+    // // if (this.resizeTimeout) {
+    // //   clearTimeout(this.resizeTimeout);
+    // // }
 
-    //   this.render();
-    // }, 100);
+    // // this.resizeTimeout = setTimeout(() => {
+    // //   const wrapper = this.canvasWrapper.nativeElement;
+    // //   const w = wrapper.clientWidth;
+    // //   const h = wrapper.clientHeight;
+
+    // //   this.camera.left = 0;
+    // //   this.camera.right = w;
+    // //   this.camera.top = h;
+    // //   this.camera.bottom = 0;
+    // //   this.camera.updateProjectionMatrix();
+
+    // //   this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // //   this.renderer.setSize(w, h, false);
+
+    // //   this.render();
+    // // }, 100);
   }
 
   private updateCamera(w: number, h: number) {

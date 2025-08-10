@@ -38,6 +38,9 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private panStart = new THREE.Vector2();
   private panEnd = new THREE.Vector2();
   private panDelta = new THREE.Vector2();
+  private isDraggingImage = false;
+  private dragStartMouse = new THREE.Vector2();
+  private dragStartPos = new THREE.Vector3();
 
 
   ngAfterViewInit(): void {
@@ -254,7 +257,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.updateMouse(event);
     this.raycaster.setFromCamera(this.mouse, this.camera);
 
-    // 1. Проверяем, попадает ли клик в cornerSpheres для distort
+    // 1. Проверяем, попадает ли клик в cornerSpheres для distort — не меняем логику
     if (this.tool === 'distort' && this.selectedMesh) {
       const cornerIntersects = this.raycaster.intersectObjects(this.cornerSpheres, false);
       if (cornerIntersects.length > 0) {
@@ -272,24 +275,58 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     if (this.selectedMesh) {
       const selectedIntersects = this.raycaster.intersectObject(this.selectedMesh, false);
       if (selectedIntersects.length > 0) {
-        // Кликнули по выбранному слою — ничего менять не нужно
-        return;
+        if (this.tool === 'move') {
+          this.isDraggingImage = true;
+          this.dragStartMouse.set(event.clientX, event.clientY);
+          this.dragStartPos.copy(this.selectedMesh.position);
+          event.preventDefault();
+        }
+        return; // Кликнули по выбранному слою — ничего менять не нужно
       }
     }
 
-    // 3. Если клик не по выбранному слою, ищем любой меш под курсором
+    // 3. Если клик не по выбранному слою, ищем любой меш под курсором и выбираем
     const intersects = this.raycaster.intersectObjects(this.meshes, false);
     if (intersects.length > 0) {
-      console.log('Выбран меш:', intersects[0].object);
-      // Просто выбираем первый пересеченный меш
       this.selectMesh(intersects[0].object as THREE.Mesh);
+
+      if (this.tool === 'move') {
+        this.isDraggingImage = true;
+        this.dragStartMouse.set(event.clientX, event.clientY);
+        this.dragStartPos.copy(this.selectedMesh!.position);
+        event.preventDefault();
+      }
     } else {
-      // Если ничего не выбрали — снимаем выбор
       this.selectMesh(null);
     }
   }
 
   private onPointerMove = (event: PointerEvent) => {
+    if (this.isDraggingImage && this.selectedMesh && this.tool === 'move') {
+      const dx = event.clientX - this.dragStartMouse.x;
+      const dy = event.clientY - this.dragStartMouse.y;
+
+      const camWidth = this.camera.right - this.camera.left;
+      const camHeight = this.camera.top - this.camera.bottom;
+
+      const wrapper = this.canvasWrapper.nativeElement;
+      const wrapperWidth = wrapper.clientWidth;
+      const wrapperHeight = wrapper.clientHeight;
+
+      // Переводим экранные пиксели в координаты мира
+      const worldDx = dx * camWidth / wrapperWidth;
+      const worldDy = -dy * camHeight / wrapperHeight;
+
+      this.selectedMesh.position.set(
+        this.dragStartPos.x + worldDx,
+        this.dragStartPos.y + worldDy,
+        this.selectedMesh.position.z
+      );
+
+      this.render();
+      return;
+    }
+
     if (this.tool === 'distort' && this.draggingCorner && this.selectedMesh) {
       this.updateMouse(event);
       this.raycaster.setFromCamera(this.mouse, this.camera);
@@ -314,8 +351,11 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  private onPointerUp = () => {
-    this.draggingCorner = null;
+  private onPointerUp = (event: PointerEvent) => {
+    if (event.button === 0) {
+      this.isDraggingImage = false;
+      this.draggingCorner = null;
+    }
   }
 
   private updateMouse(event: PointerEvent) {
@@ -358,6 +398,10 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
           const mesh = new THREE.Mesh(geometry, material);
           mesh.userData["name"] = file.name;
+          mesh.userData['originalSize'] = {
+            width: imgWidth,
+            height: imgHeight,
+          };
 
           this.addImageLayer(mesh);
         });
@@ -371,6 +415,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     const camWidth = this.camera.right - this.camera.left;
     const camHeight = this.camera.top - this.camera.bottom;
     mesh.position.set(this.camera.left + camWidth / 2, this.camera.bottom + camHeight / 2, 0);
+    mesh.scale.set(1, 1, 1);
 
     this.scene.add(mesh);
     this.meshes.push(mesh);

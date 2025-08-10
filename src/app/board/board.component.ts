@@ -10,7 +10,7 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
   selector: 'app-board',
   templateUrl: './board.component.html',
   styleUrls: ['./board.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  // changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class BoardComponent implements AfterViewInit, OnDestroy {
 
@@ -141,22 +141,41 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   }
 
   private onPointerDown = (event: PointerEvent) => {
+    this.updateMouse(event);
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+
+    // 1. Проверяем, попадает ли клик в cornerSpheres для distort
     if (this.tool === 'distort' && this.selectedMesh) {
-      this.updateMouse(event);
-      this.raycaster.setFromCamera(this.mouse, this.camera);
-      const intersects = this.raycaster.intersectObjects(this.cornerSpheres);
+      const cornerIntersects = this.raycaster.intersectObjects(this.cornerSpheres, false);
+      if (cornerIntersects.length > 0) {
+        this.draggingCorner = cornerIntersects[0].object as THREE.Mesh;
 
-      if (intersects.length > 0) {
-        this.draggingCorner = intersects[0].object as THREE.Mesh;
-
-        // При клике оффсет в локальных координатах!
-        const intersectPoint = intersects[0].point.clone();
+        const intersectPoint = cornerIntersects[0].point.clone();
         const localIntersect = this.selectedMesh.worldToLocal(intersectPoint);
-
         this.dragOffset.copy(localIntersect).sub(this.draggingCorner.position);
 
         return;
       }
+    }
+
+    // 2. Проверяем, пересекается ли выбранный меш под курсором
+    if (this.selectedMesh) {
+      const selectedIntersects = this.raycaster.intersectObject(this.selectedMesh, false);
+      if (selectedIntersects.length > 0) {
+        // Кликнули по выбранному слою — ничего менять не нужно
+        return;
+      }
+    }
+
+    // 3. Если клик не по выбранному слою, ищем любой меш под курсором
+    const intersects = this.raycaster.intersectObjects(this.meshes, false);
+    if (intersects.length > 0) {
+      console.log('Выбран меш:', intersects[0].object);
+      // Просто выбираем первый пересеченный меш
+      this.selectMesh(intersects[0].object as THREE.Mesh);
+    } else {
+      // Если ничего не выбрали — снимаем выбор
+      this.selectMesh(null);
     }
   }
 
@@ -248,6 +267,19 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         this.initTransform(mesh);
       }
     }
+
+    // if (mesh) {
+    //   if (this.tool === 'distort') {
+    //     this.initDistort(mesh);
+    //   } else {
+    //     this.transformControls.attach(mesh);
+    //     this.transformControls.setMode(this.tool === 'move' ? 'translate' : this.tool === 'scale' ? 'scale' : 'rotate');
+    //   }
+    // } else {
+    //   this.transformControls.detach();
+    //   this.clearDistort();
+    // }
+
     this.render();
   }
 
@@ -268,7 +300,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     this.transformControls.showX = true;
     this.transformControls.showY = true;
-    this.transformControls.showZ = false;
+    this.transformControls.showZ = true;
 
     // Внимание: слушатель objectChange больше не добавляем здесь
   }
@@ -379,6 +411,8 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         this.initDistort(this.selectedMesh);
       } else {
         this.initTransform(this.selectedMesh);
+        // this.transformControls.attach(this.selectedMesh);
+        // this.transformControls.setMode(tool === 'move' ? 'translate' : tool === 'scale' ? 'scale' : 'rotate');
       }
     } else {
       this.transformControls.detach();

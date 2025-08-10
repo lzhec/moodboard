@@ -1,5 +1,6 @@
 import {
-  Component, ElementRef, ViewChild, AfterViewInit, OnDestroy
+  Component, ElementRef, ViewChild, AfterViewInit, OnDestroy,
+  ChangeDetectionStrategy
 } from '@angular/core';
 
 import * as THREE from 'three';
@@ -8,7 +9,8 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 @Component({
   selector: 'app-board',
   templateUrl: './board.component.html',
-  styleUrls: ['./board.component.scss']
+  styleUrls: ['./board.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class BoardComponent implements AfterViewInit, OnDestroy {
 
@@ -18,7 +20,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private camera!: THREE.OrthographicCamera;
   private renderer!: THREE.WebGLRenderer;
   private transformControls!: TransformControls;
-
 
   meshes: THREE.Mesh[] = [];
   selectedMesh: THREE.Mesh | null = null;
@@ -36,8 +37,16 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
   ngAfterViewInit(): void {
     this.initThree();
-    this.animate();
+
+    const wrapper = this.canvasWrapper.nativeElement;
+    const w = wrapper.clientWidth;
+    const h = wrapper.clientHeight;
+
+    this.renderer.setSize(w, h, false); // один раз
+    this.updateCamera(w, h);
+
     window.addEventListener('resize', this.onResize);
+    this.render();  // отрисовать первый кадр
   }
 
   ngOnDestroy(): void {
@@ -62,6 +71,12 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
     this.transformControls.addEventListener('dragging-changed', (event) => {
       this.isDragging = !!event.value;
+      // При начале или окончании перетаскивания — рендерим
+      this.render();
+    });
+    this.transformControls.addEventListener('objectChange', () => {
+      // При изменении объекта (движение, масштаб, вращение)
+      this.render();
     });
     this.scene.add(this.transformControls.getHelper());
 
@@ -93,7 +108,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       if (intersects.length > 0) {
         this.draggingCorner = intersects[0].object as THREE.Mesh;
 
-        // При клике оффсет тоже надо в локальных координатах!
+        // При клике оффсет в локальных координатах!
         const intersectPoint = intersects[0].point.clone();
         const localIntersect = this.selectedMesh.worldToLocal(intersectPoint);
 
@@ -117,7 +132,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       // Преобразуем мировую точку в локальные координаты меша
       const localPos = this.selectedMesh.worldToLocal(intersectPoint.clone());
 
-      // Вычитаем оффсет (в локальных координатах, лучше пересчитывать dragOffset тоже локально при pointerdown)
+      // Вычитаем оффсет (в локальных координатах)
       const newLocalPos = localPos.sub(this.dragOffset);
 
       newLocalPos.z = 0; // чтобы плоскость оставалась XY
@@ -125,6 +140,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       this.draggingCorner.position.copy(newLocalPos);
 
       this.updateDistort();
+      this.render();
     }
   }
 
@@ -173,6 +189,8 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     this.meshes.push(mesh);
     this.selectMesh(mesh);
+
+    this.render();
   }
 
   selectMesh(mesh: THREE.Mesh | null) {
@@ -189,6 +207,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         this.initTransform(mesh);
       }
     }
+    this.render();
   }
 
   private clearTransform() {
@@ -230,6 +249,8 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         // Фиксируем масштаб по Z
         this.selectedMesh.scale.z = 1;
       }
+
+      this.render();
     });
   }
 
@@ -280,6 +301,8 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       this.scene.add(sphere);
       this.cornerSpheres.push(sphere);
     }
+
+    this.render();
   }
 
   private clearDistort() {
@@ -289,6 +312,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       (s.material as THREE.Material).dispose();
     });
     this.cornerSpheres = [];
+    this.render();
   }
 
   private updateDistort() {
@@ -341,12 +365,22 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       this.transformControls.detach();
       this.clearDistort();
     }
+
+    this.render();
   }
 
   flipSelected(axis: 'x' | 'y') {
-    if (!this.selectedMesh) return;
-    if (axis === 'x') this.selectedMesh.scale.x *= -1;
-    else this.selectedMesh.scale.y *= -1;
+    if (!this.selectedMesh) {
+      return
+    };
+
+    if (axis === 'x') {
+      this.selectedMesh.scale.x *= -1;
+    } else {
+      this.selectedMesh.scale.y *= -1;
+    }
+
+    this.render();
   }
 
   deleteSelected() {
@@ -358,21 +392,33 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     if (index >= 0) this.meshes.splice(index, 1);
 
     this.selectedMesh = null;
+
+    this.render();
   }
 
   moveLayerUp() {
-    if (!this.selectedMesh) return;
+    if (!this.selectedMesh) {
+      return;
+    }
+
     const index = this.meshes.indexOf(this.selectedMesh);
+
     if (index < this.meshes.length - 1) {
       this.swapLayers(index, index + 1);
+      this.render();
     }
   }
 
   moveLayerDown() {
-    if (!this.selectedMesh) return;
+    if (!this.selectedMesh) {
+      return;
+    }
+
     const index = this.meshes.indexOf(this.selectedMesh);
+
     if (index > 0) {
       this.swapLayers(index, index - 1);
+      this.render();
     }
   }
 
@@ -380,30 +426,33 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     const m1 = this.meshes[i1];
     const m2 = this.meshes[i2];
 
-    // Меняем z-позиции (слой)
     const tempZ = m1.position.z;
     m1.position.z = m2.position.z;
     m2.position.z = tempZ;
 
-    // Меняем местами в массиве
     this.meshes[i1] = m2;
     this.meshes[i2] = m1;
   }
 
-  private animate = () => {
-    requestAnimationFrame(this.animate);
+  private render() {
     this.renderer.render(this.scene, this.camera);
   }
 
   private onResize = () => {
-    const w = this.canvasWrapper.nativeElement.clientWidth;
-    const h = this.canvasWrapper.nativeElement.clientHeight;
+    const wrapper = this.canvasWrapper.nativeElement;
+    const w = wrapper.clientWidth;
+    const h = wrapper.clientHeight;
+
+    this.updateCamera(w, h);
+    this.render();
+  }
+
+  private updateCamera(w: number, h: number) {
     this.camera.left = 0;
     this.camera.right = w;
     this.camera.top = h;
     this.camera.bottom = 0;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(w, h);
   }
 
   private dispose() {

@@ -326,41 +326,48 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
   onFilesSelected(event: Event) {
     const input = event.target as HTMLInputElement;
-    if (!input.files) return;
+    if (!input.files?.length) return;
 
-    Array.from(input.files).forEach(file => {
-      const url = URL.createObjectURL(file);
-      new THREE.TextureLoader().load(url, (texture) => {
-        this.addImageLayer(texture, file.name);
-        URL.revokeObjectURL(url);
-      });
+    Array.from(input.files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const loader = new THREE.TextureLoader();
+        loader.load(e.target!.result as string, (texture) => {
+          texture.minFilter = THREE.LinearFilter;
+          texture.magFilter = THREE.LinearFilter;
+          texture.generateMipmaps = false;
+          texture.needsUpdate = true;
+
+          const imgWidth = texture.image.width;
+          const imgHeight = texture.image.height;
+
+          const geometry = new THREE.PlaneGeometry(imgWidth, imgHeight);
+
+          const material = new THREE.MeshBasicMaterial({
+            map: texture,
+            transparent: true
+          });
+
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.userData["name"] = file.name;
+
+          this.addImageLayer(mesh);
+        });
+      };
+      reader.readAsDataURL(file);
     });
-    input.value = '';
   }
 
-  private addImageLayer(texture: THREE.Texture, name?: string) {
-    const wrap = this.canvasWrapper.nativeElement;
-    const w = wrap.clientWidth / 3;
-    const h = wrap.clientHeight / 3;
-    const segments = 10;
-    const geo = new THREE.PlaneGeometry(w, h, segments, segments);
+  private addImageLayer(mesh: THREE.Mesh) {
+    // Центрируем в середине экрана камеры
+    const camWidth = this.camera.right - this.camera.left;
+    const camHeight = this.camera.top - this.camera.bottom;
+    mesh.position.set(this.camera.left + camWidth / 2, this.camera.bottom + camHeight / 2, 0);
 
-    // Сохраняем параметры, чтобы потом использовать
-    geo.userData = {
-      widthSegments: segments,
-      heightSegments: segments
-    };
-
-    const mat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(wrap.clientWidth / 2, wrap.clientHeight / 2, this.meshes.length * 10);
-    mesh.userData['name'] = name || 'Image';
     this.scene.add(mesh);
-
     this.meshes.push(mesh);
-    this.selectMesh(mesh);
 
-    this.render();
+    this.render(); // Отрисовать сразу
   }
 
   selectMesh(mesh: THREE.Mesh | null) {

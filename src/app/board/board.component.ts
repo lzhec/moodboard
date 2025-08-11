@@ -5,6 +5,7 @@ import {
 
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import { ResizeBoxControls } from './controls/controls';
 
 @Component({
   selector: 'app-board',
@@ -32,6 +33,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
   private dragOffset = new THREE.Vector3();
+  private resizeControls!: ResizeBoxControls;
 
   private resizeTimeout: ReturnType<typeof setTimeout> | null = null;
   private isPanning = false;
@@ -41,7 +43,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private isDraggingImage = false;
   private dragStartMouse = new THREE.Vector2();
   private dragStartPos = new THREE.Vector3();
-
 
   ngAfterViewInit(): void {
     this.initThree();
@@ -106,10 +107,18 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         this.selectedMesh.scale.z = 1;
       }
 
+      // Вызов обновления позиции ручек, если выбран scale
+      if (this.tool === 'scale' && this.resizeControls) {
+        this.resizeControls.updateHandlesPosition();
+      }
+
       this.render();
     });
 
-    this.scene.add(this.transformControls.getHelper());
+    this.resizeControls = new ResizeBoxControls(this.camera, this.renderer.domElement);
+    this.resizeControls.onChange = () => this.render();
+
+    this.scene.add(this.resizeControls);
 
     this.setupInteraction();
   }
@@ -427,29 +436,27 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   selectMesh(mesh: THREE.Mesh | null) {
     if (this.selectedMesh === mesh) return;
 
-    // Снять предыдущие контролы и углы
+    // Снимаем старые контролы и углы
     this.clearTransform();
     this.selectedMesh = mesh;
 
     if (mesh) {
       if (this.tool === 'distort') {
         this.initDistort(mesh);
+        this.resizeControls.setTarget(null); // скрываем resize при distort
+      } else if (this.tool === 'scale') {
+        this.resizeControls.setTarget(mesh);
+        this.transformControls.detach(); // отключаем transformControls при кастомном scale
+        this.clearDistort();
       } else {
+        this.resizeControls.setTarget(null); // скрываем resize при move/rotate
         this.initTransform(mesh);
       }
+    } else {
+      this.resizeControls.setTarget(null);
+      this.transformControls.detach();
+      this.clearDistort();
     }
-
-    // if (mesh) {
-    //   if (this.tool === 'distort') {
-    //     this.initDistort(mesh);
-    //   } else {
-    //     this.transformControls.attach(mesh);
-    //     this.transformControls.setMode(this.tool === 'move' ? 'translate' : this.tool === 'scale' ? 'scale' : 'rotate');
-    //   }
-    // } else {
-    //   this.transformControls.detach();
-    //   this.clearDistort();
-    // }
 
     this.render();
   }
@@ -464,9 +471,17 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.transformControls.attach(mesh);
 
     switch (this.tool) {
-      case 'move': this.transformControls.setMode('translate'); break;
-      case 'scale': this.transformControls.setMode('scale'); break;
-      case 'rotate': this.transformControls.setMode('rotate'); break;
+      case 'move':
+        this.transformControls.setMode('translate');
+        break;
+
+      // case 'scale':
+      //   this.transformControls.setMode('scale');
+      //   break;
+
+      case 'rotate':
+        this.transformControls.setMode('rotate');
+        break;
     }
 
     this.transformControls.showX = true;
@@ -577,15 +592,22 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   setTool(tool: 'move' | 'scale' | 'rotate' | 'distort') {
     if (this.tool === tool) return;
     this.tool = tool;
+
     if (this.selectedMesh) {
-      if (tool === 'distort') {
-        this.initDistort(this.selectedMesh);
+      if (tool === 'scale') {
+        this.resizeControls.setTarget(this.selectedMesh);
+        this.transformControls.detach();
+        this.clearDistort();
       } else {
-        this.initTransform(this.selectedMesh);
-        // this.transformControls.attach(this.selectedMesh);
-        // this.transformControls.setMode(tool === 'move' ? 'translate' : tool === 'scale' ? 'scale' : 'rotate');
+        this.resizeControls.setTarget(null);  // <--- Снимаем ручки
+        if (tool === 'distort') {
+          this.initDistort(this.selectedMesh);
+        } else {
+          this.initTransform(this.selectedMesh);
+        }
       }
     } else {
+      this.resizeControls.setTarget(null);
       this.transformControls.detach();
       this.clearDistort();
     }
@@ -663,21 +685,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   }
 
   private onResize = () => {
-    // const wrapper = this.canvasWrapper.nativeElement;
-    // const w = wrapper.clientWidth;
-    // const h = wrapper.clientHeight;
-
-    // this.camera.left = 0;
-    // this.camera.right = w;
-    // this.camera.top = h;
-    // this.camera.bottom = 0;
-    // this.camera.updateProjectionMatrix();
-
-    // // Ограничиваем pixel ratio для предотвращения чрезмерной нагрузки
-    // const maxPixelRatio = 2; // можно уменьшить, если нужно
-    // this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
-    // this.renderer.setSize(w, h, false);
-
     const w = window.innerWidth;
     const h = window.innerHeight;
 
@@ -694,43 +701,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.renderer.domElement.style.height = '100vh';
 
     this.render();
-
-    // const wrapper = this.canvasWrapper.nativeElement;
-    // const w = wrapper.clientWidth;
-    // const h = wrapper.clientHeight;
-
-    // this.camera.left = 0;
-    // this.camera.right = w;
-    // this.camera.top = h;
-    // this.camera.bottom = 0;
-    // this.camera.updateProjectionMatrix();
-
-    // // Ограничиваем pixel ratio для предотвращения чрезмерной нагрузки
-    // const maxPixelRatio = 2; // можно уменьшить, если нужно
-    // this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
-    // this.renderer.setSize(w, h, false);
-    // this.render();
-
-    // // if (this.resizeTimeout) {
-    // //   clearTimeout(this.resizeTimeout);
-    // // }
-
-    // // this.resizeTimeout = setTimeout(() => {
-    // //   const wrapper = this.canvasWrapper.nativeElement;
-    // //   const w = wrapper.clientWidth;
-    // //   const h = wrapper.clientHeight;
-
-    // //   this.camera.left = 0;
-    // //   this.camera.right = w;
-    // //   this.camera.top = h;
-    // //   this.camera.bottom = 0;
-    // //   this.camera.updateProjectionMatrix();
-
-    // //   this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    // //   this.renderer.setSize(w, h, false);
-
-    // //   this.render();
-    // // }, 100);
   }
 
   private updateCamera(w: number, h: number) {

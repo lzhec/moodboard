@@ -27,6 +27,13 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
   tool: 'move' | 'scale' | 'rotate' | 'distort' = 'move';
 
+  // Для ресайза
+  private resizeSpheres: THREE.Mesh[] = [];
+  private resizingCorner: THREE.Mesh | null = null;
+  private resizeDragOffset = new THREE.Vector3();
+  private resizeStartSize = new THREE.Vector2();
+  private resizeStartPos = new THREE.Vector3();
+  private resizeStartMouse = new THREE.Vector2();
   // Для дисторшна
   private cornerSpheres: THREE.Mesh[] = [];
   private draggingCorner: THREE.Mesh | null = null;
@@ -266,7 +273,26 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.updateMouse(event);
     this.raycaster.setFromCamera(this.mouse, this.camera);
 
-    // 1. Проверяем, попадает ли клик в cornerSpheres для distort — не меняем логику
+    // 1. Проверяем, попадает ли клик в ручки ресайза
+    if (this.tool === 'scale' && this.selectedMesh) {
+      const resizeIntersects = this.raycaster.intersectObjects(this.resizeSpheres, false);
+      if (resizeIntersects.length > 0) {
+        this.resizingCorner = resizeIntersects[0].object as THREE.Mesh;
+
+        // Запоминаем начальные параметры
+        const geo = this.selectedMesh.geometry as THREE.PlaneGeometry;
+        const originalWidth = geo.parameters.width;
+        const originalHeight = geo.parameters.height;
+
+        this.resizeStartSize.set(originalWidth, originalHeight);
+        this.resizeStartPos.copy(this.selectedMesh.position);
+        this.resizeStartMouse.set(event.clientX, event.clientY);
+
+        return;
+      }
+    }
+
+    // 2. Проверяем, попадает ли клик в cornerSpheres для distort — не меняем логику
     if (this.tool === 'distort' && this.selectedMesh) {
       const cornerIntersects = this.raycaster.intersectObjects(this.cornerSpheres, false);
       if (cornerIntersects.length > 0) {
@@ -311,6 +337,58 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   }
 
   private onPointerMove = (event: PointerEvent) => {
+    // Логика ресайза
+    if (this.tool === 'scale' && this.resizingCorner && this.selectedMesh) {
+      const dx = event.clientX - this.resizeStartMouse.x;
+      const dy = event.clientY - this.resizeStartMouse.y;
+
+      const camWidth = this.camera.right - this.camera.left;
+      const camHeight = this.camera.top - this.camera.bottom;
+      const wrapper = this.canvasWrapper.nativeElement;
+      const wrapperWidth = wrapper.clientWidth;
+      const wrapperHeight = wrapper.clientHeight;
+
+      // Коэффициент масштабирования
+      const scaleX = 1 + dx / wrapperWidth * 2;
+      const scaleY = 1 + dy / wrapperHeight * 2;
+
+      // Определяем направление ресайза по индексу угла
+      const cornerIndex = this.resizingCorner.userData['cornerIndex'];
+
+      // Новые размеры
+      const newWidth = this.resizeStartSize.x * scaleX;
+      const newHeight = this.resizeStartSize.y * scaleY;
+
+      // Пересоздаем геометрию
+      const segments = 10;
+      const newGeometry = new THREE.PlaneGeometry(newWidth, newHeight, segments, segments);
+      newGeometry.userData = {
+        widthSegments: segments,
+        heightSegments: segments
+      };
+
+      // Обновляем геометрию и позицию
+      this.selectedMesh.geometry.dispose();
+      this.selectedMesh.geometry = newGeometry;
+
+      // Корректируем позицию в зависимости от угла
+      const positionAdjustment = this.calculatePositionAdjustment(
+        cornerIndex,
+        this.resizeStartPos,
+        this.resizeStartSize,
+        new THREE.Vector2(newWidth, newHeight)
+      );
+
+      this.selectedMesh.position.copy(positionAdjustment);
+
+      // Обновляем ручки ресайза
+      this.clearResizeHandles();
+      this.createResizeHandles(this.selectedMesh);
+
+      this.render();
+      return;
+    }
+
     if (this.isDraggingImage && this.selectedMesh && this.tool === 'move') {
       const dx = event.clientX - this.dragStartMouse.x;
       const dy = event.clientY - this.dragStartMouse.y;
@@ -364,6 +442,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     if (event.button === 0) {
       this.isDraggingImage = false;
       this.draggingCorner = null;
+      this.resizingCorner = null;  // Сбрасываем ресайз
     }
   }
 
@@ -442,20 +521,20 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     if (mesh) {
       if (this.tool === 'distort') {
-        this.initDistort(mesh);
-        this.resizeControls.setTarget(null); // скрываем resize при distort
+        this.initDistortHandles(mesh);
+        this.clearResizeHandles(); // скрываем resize при distort
       } else if (this.tool === 'scale') {
-        this.resizeControls.setTarget(mesh);
-        this.transformControls.detach(); // отключаем transformControls при кастомном scale
-        this.clearDistort();
+        this.initResizeHandles(mesh);
+        this.clearDistortHandles();
       } else {
-        this.resizeControls.setTarget(null); // скрываем resize при move/rotate
+        this.clearResizeHandles();
+        this.clearDistortHandles();
         this.initTransform(mesh);
       }
     } else {
       this.resizeControls.setTarget(null);
       this.transformControls.detach();
-      this.clearDistort();
+      this.clearDistortHandles();
     }
 
     this.render();
@@ -463,11 +542,11 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
   private clearTransform() {
     this.transformControls.detach();
-    this.clearDistort();
+    this.clearDistortHandles();
   }
 
   private initTransform(mesh: THREE.Mesh) {
-    this.clearDistort();
+    this.clearDistortHandles();
     this.transformControls.attach(mesh);
 
     switch (this.tool) {
@@ -491,13 +570,62 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     // Внимание: слушатель objectChange больше не добавляем здесь
   }
 
-  private initDistort(mesh: THREE.Mesh) {
+  private initDistortHandles(mesh: THREE.Mesh) {
     this.transformControls.detach();
     this.createDistortHandles(mesh);
   }
 
+  private initResizeHandles(mesh: THREE.Mesh) {
+    this.transformControls.detach();
+    this.createResizeHandles(mesh);
+  }
+
+  private createResizeHandles(mesh: THREE.Mesh) {
+    // Очистить предыдущие ручки
+    this.clearResizeHandles();
+
+    mesh.updateMatrixWorld(true);
+
+    const geo = mesh.geometry as THREE.BufferGeometry;
+    const posAttr = geo.attributes['position'] as THREE.BufferAttribute;
+
+    const userData = geo.userData as { widthSegments: number; heightSegments: number };
+    const segmentsX = userData?.widthSegments + 1 || 11;
+    const segmentsY = userData?.heightSegments + 1 || 11;
+
+    // Индексы углов (или можно брать грани по X и Y для resize)
+    // Предположим, что для ресайза — используем 4 угла (можно добавить средние ручки по сторонам, если надо)
+    const cornerIndices = [
+      0,                           // верхний левый
+      segmentsX - 1,               // верхний правый
+      segmentsX * segmentsY - 1,   // нижний правый
+      segmentsX * (segmentsY - 1)  // нижний левый
+    ];
+
+    for (let i = 0; i < 4; i++) {
+      const idx = cornerIndices[i];
+      const x = posAttr.getX(idx);
+      const y = posAttr.getY(idx);
+      const localPos = new THREE.Vector3(x, y, 0);
+
+      const worldPos = localPos.clone().applyMatrix4(mesh.matrixWorld);
+
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(8, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0x00aaff })
+      );
+      sphere.position.copy(worldPos);
+      sphere.userData['cornerIndex'] = i;
+
+      this.scene.add(sphere);
+      this.resizeSpheres.push(sphere);
+    }
+
+    this.render();
+  }
+
   private createDistortHandles(mesh: THREE.Mesh) {
-    this.clearDistort();
+    this.clearDistortHandles();
 
     mesh.updateMatrixWorld(true);
 
@@ -542,7 +670,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  private clearDistort() {
+  private clearDistortHandles() {
     this.cornerSpheres.forEach(s => {
       this.scene.remove(s);
       s.geometry.dispose();
@@ -550,6 +678,55 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     });
     this.cornerSpheres = [];
     this.render();
+  }
+
+  private clearResizeHandles() {
+    this.resizeSpheres.forEach(s => {
+      this.scene.remove(s);
+      s.geometry.dispose();
+      (s.material as THREE.Material).dispose();
+    });
+    this.resizeSpheres = [];
+    this.render();
+  }
+
+  private calculatePositionAdjustment(
+    cornerIndex: number,
+    startPos: THREE.Vector3,
+    startSize: THREE.Vector2,
+    newSize: THREE.Vector2
+  ): THREE.Vector3 {
+    const dx = (newSize.x - startSize.x) / 2;
+    const dy = (newSize.y - startSize.y) / 2;
+
+    switch (cornerIndex) {
+      case 0: // верхний левый
+        return new THREE.Vector3(
+          startPos.x + dx,
+          startPos.y - dy,
+          startPos.z
+        );
+      case 1: // верхний правый
+        return new THREE.Vector3(
+          startPos.x - dx,
+          startPos.y - dy,
+          startPos.z
+        );
+      case 2: // нижний правый
+        return new THREE.Vector3(
+          startPos.x - dx,
+          startPos.y + dy,
+          startPos.z
+        );
+      case 3: // нижний левый
+        return new THREE.Vector3(
+          startPos.x + dx,
+          startPos.y + dy,
+          startPos.z
+        );
+      default:
+        return startPos;
+    }
   }
 
   private updateDistort() {
@@ -594,22 +771,39 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.tool = tool;
 
     if (this.selectedMesh) {
-      if (tool === 'scale') {
-        this.resizeControls.setTarget(this.selectedMesh);
-        this.transformControls.detach();
-        this.clearDistort();
-      } else {
-        this.resizeControls.setTarget(null);  // <--- Снимаем ручки
-        if (tool === 'distort') {
-          this.initDistort(this.selectedMesh);
-        } else {
+      switch (tool) {
+        case 'scale':
+          this.initResizeHandles(this.selectedMesh);
+          this.clearDistortHandles();
+          this.transformControls.detach();
+          break;
+
+        case 'distort':
+          this.initDistortHandles(this.selectedMesh);
+          this.clearResizeHandles();
+          this.transformControls.detach();
+          break;
+
+        default:
           this.initTransform(this.selectedMesh);
-        }
       }
+
+      // if (tool === 'scale') {
+      //   this.initResizeHandles(this.selectedMesh);
+      //   this.transformControls.detach();
+      //   this.clearDistortHandles();
+      // } else {
+      //   this.resizeControls.setTarget(null);  // <--- Снимаем ручки
+      //   if (tool === 'distort') {
+      //     this.initDistortHandles(this.selectedMesh);
+      //   } else {
+      //     this.initTransform(this.selectedMesh);
+      //   }
+      // }
     } else {
-      this.resizeControls.setTarget(null);
       this.transformControls.detach();
-      this.clearDistort();
+      this.clearResizeHandles();
+      this.clearDistortHandles();
     }
 
     this.render();
@@ -728,7 +922,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     this.meshes = [];
 
-    this.clearDistort();
+    this.clearDistortHandles();
 
     if (this.renderer) {
       this.renderer.dispose();

@@ -348,12 +348,22 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       const wrapperWidth = wrapper.clientWidth;
       const wrapperHeight = wrapper.clientHeight;
 
-      // Коэффициент масштабирования
-      const scaleX = 1 + dx / wrapperWidth * 2;
-      const scaleY = 1 + dy / wrapperHeight * 2;
-
-      // Определяем направление ресайза по индексу угла
       const cornerIndex = this.resizingCorner.userData['cornerIndex'];
+
+      // Инвертируем dx и dy для специфических углов
+      let scaleDx = dx;
+      let scaleDy = dy;
+
+      switch (cornerIndex) {
+        case 2: // правый нижний - инвертируем dx и dy
+          scaleDx = -dx;
+          scaleDy = -dy;
+          break;
+      }
+
+      // Коэффициент масштабирования
+      const scaleX = 1 + scaleDx / wrapperWidth * 2;
+      const scaleY = 1 + scaleDy / wrapperHeight * 2;
 
       // Новые размеры
       const newWidth = this.resizeStartSize.x * scaleX;
@@ -596,10 +606,10 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     // Индексы углов (или можно брать грани по X и Y для resize)
     // Предположим, что для ресайза — используем 4 угла (можно добавить средние ручки по сторонам, если надо)
     const cornerIndices = [
-      0,                           // верхний левый
-      segmentsX - 1,               // верхний правый
-      segmentsX * segmentsY - 1,   // нижний правый
-      segmentsX * (segmentsY - 1)  // нижний левый
+      segmentsX * segmentsY - 1,       // нижний правый
+      segmentsX - 1,                   // верхний правый
+      0,                               // верхний левый
+      segmentsX * (segmentsY - 1)      // нижний левый
     ];
 
     for (let i = 0; i < 4; i++) {

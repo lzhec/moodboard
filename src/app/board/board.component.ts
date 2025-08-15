@@ -355,8 +355,14 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       let scaleDy = dy;
 
       switch (cornerIndex) {
+        case 1: // левый нижний - инвертируем dx
+          scaleDx = -dx;
+          break;
         case 2: // правый нижний - инвертируем dx и dy
           scaleDx = -dx;
+          scaleDy = -dy;
+          break;
+        case 3: // правый верхний - инвертируем dy
           scaleDy = -dy;
           break;
       }
@@ -607,9 +613,10 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     // Предположим, что для ресайза — используем 4 угла (можно добавить средние ручки по сторонам, если надо)
     const cornerIndices = [
       segmentsX * segmentsY - 1,       // нижний правый
-      segmentsX - 1,                   // верхний правый
+      segmentsX * (segmentsY - 1),      // нижний левый
       0,                               // верхний левый
-      segmentsX * (segmentsY - 1)      // нижний левый
+      segmentsX - 1,                   // верхний правый
+
     ];
 
     for (let i = 0; i < 4; i++) {

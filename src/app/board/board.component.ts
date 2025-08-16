@@ -34,13 +34,17 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private resizeStartSize = new THREE.Vector2();
   private resizeStartPos = new THREE.Vector3();
   private resizeStartMouse = new THREE.Vector2();
+  private resizeControls!: ResizeBoxControls;
   // Для дисторшна
   private cornerSpheres: THREE.Mesh[] = [];
   private draggingCorner: THREE.Mesh | null = null;
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
   private dragOffset = new THREE.Vector3();
-  private resizeControls!: ResizeBoxControls;
+  // Для вращения
+  private rotateHandle: THREE.Mesh | null = null;
+  private isRotating = false;
+  private rotateStartAngle = 0;
 
   private resizeTimeout: ReturnType<typeof setTimeout> | null = null;
   private isPanning = false;
@@ -147,6 +151,9 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     dom.removeEventListener('pointerdown', this.onPointerDown);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
+    window.removeEventListener('mousemove', this.onMouseMove);
+    window.removeEventListener('mouseup', this.onMouseUp);
+    this.renderer.domElement.removeEventListener('mousedown', this.onMouseDown);
   }
 
   private onWheel = (event: WheelEvent) => {
@@ -209,10 +216,68 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       event.preventDefault();
       this.isPanning = true;
       this.panStart.set(event.clientX, event.clientY);
+    } else if (this.tool === 'rotate' && this.rotateHandle) {
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+
+      // Создаем вектор мыши в нормализованных координатах
+      const mouse = new THREE.Vector2(
+        (mouseX / rect.width) * 2 - 1,
+        -(mouseY / rect.height) * 2 + 1
+      );
+
+      // Настраиваем raycaster с текущей камерой
+      this.raycaster.setFromCamera(mouse, this.camera);
+
+      // Проверяем пересечение с ручкой вращения
+      const intersects = this.raycaster.intersectObject(this.rotateHandle);
+
+      if (intersects.length > 0) {
+        this.isRotating = true;
+        this.rotateStartAngle = this.calculateRotationAngle(event);
+        event.preventDefault();
+        return;
+      }
     }
   }
 
   private onMouseMove = (event: MouseEvent) => {
+    // Проверяем, что мы в режиме поворота и идет процесс вращения
+    // if (this.tool === 'rotate' && this.isRotating && this.selectedMesh) {
+    //   const currentAngle = this.calculateRotationAngle(event);
+    //   const angleDelta = currentAngle - this.rotateStartAngle;
+
+    //   console.log('Rotation details:', {
+    //     angleDelta: angleDelta,
+    //     currentAngle: currentAngle,
+    //     rotateStartAngle: this.rotateStartAngle,
+    //     meshPosition: this.selectedMesh.position.clone(),
+    //     meshRotation: this.selectedMesh.rotation.clone()
+    //   });
+
+    //   // Используем более надежный метод поворота
+    //   this.selectedMesh.rotateOnAxis(new THREE.Vector3(0, 0, 1), angleDelta);
+
+    //   this.rotateStartAngle = currentAngle;
+
+    //   // Обновляем позицию ручки поворота
+    //   if (this.rotateHandle) {
+    //     const bbox = new THREE.Box3().setFromObject(this.selectedMesh);
+    //     const center = bbox.getCenter(new THREE.Vector3());
+    //     const size = bbox.getSize(new THREE.Vector3());
+
+    //     this.rotateHandle.position.set(
+    //       center.x,
+    //       center.y + size.y / 2 + 50,
+    //       center.z
+    //     );
+    //   }
+
+    //   this.render();
+    //   return;
+    // }
+
     if (!this.isPanning) return;
 
     this.panEnd.set(event.clientX, event.clientY);
@@ -240,6 +305,10 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private onMouseUp = (event: MouseEvent) => {
     if (event.button === 1 && this.isPanning) {
       this.isPanning = false;
+    }
+
+    if (this.tool === 'rotate') {
+      this.isRotating = false;
     }
   }
 
@@ -292,7 +361,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       }
     }
 
-    // 2. Проверяем, попадает ли клик в cornerSpheres для distort — не меняем логику
+    // 2. Проверяем, попадает ли клик в cornerSpheres для distort
     if (this.tool === 'distort' && this.selectedMesh) {
       const cornerIntersects = this.raycaster.intersectObjects(this.cornerSpheres, false);
       if (cornerIntersects.length > 0) {
@@ -306,7 +375,19 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       }
     }
 
-    // 2. Проверяем, пересекается ли выбранный меш под курсором
+    // 3. Проверяем, попадает ли клик в ротейт-ручку
+    if (this.tool === 'rotate' && this.selectedMesh && this.rotateHandle) {
+      const rotateIntersects = this.raycaster.intersectObject(this.rotateHandle);
+      if (rotateIntersects.length > 0) {
+        this.isRotating = true;
+        this.rotateStartAngle = this.calculateRotationAngle(event);
+        this.dragStartMouse.set(event.clientX, event.clientY);
+        event.preventDefault();
+        return;
+      }
+    }
+
+    // 4. Проверяем, пересекается ли выбранный меш под курсором
     if (this.selectedMesh) {
       const selectedIntersects = this.raycaster.intersectObject(this.selectedMesh, false);
       if (selectedIntersects.length > 0) {
@@ -320,7 +401,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       }
     }
 
-    // 3. Если клик не по выбранному слою, ищем любой меш под курсором и выбираем
+    // 5. Если клик не по выбранному слою, ищем любой меш под курсором и выбираем
     const intersects = this.raycaster.intersectObjects(this.meshes, false);
     if (intersects.length > 0) {
       this.selectMesh(intersects[0].object as THREE.Mesh);
@@ -405,6 +486,24 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       return;
     }
 
+    // Проверяем, что мы в режиме поворота и идет процесс вращения
+    if (this.tool === 'rotate' && this.isRotating && this.selectedMesh) {
+      const dx = event.clientX - this.dragStartMouse.x;
+      const dy = event.clientY - this.dragStartMouse.y;
+
+      // Замедляем вращение с помощью коэффициента
+      const slowdownFactor = 0.1; // Можно подобрать по вкусу
+      const angleDelta = Math.atan2(dy, dx) * slowdownFactor;
+
+      // Вращаем mesh вокруг его центра по оси Z
+      this.selectedMesh.rotateZ(angleDelta);
+
+      // Обновляем начальную позицию мыши для следующего движения
+      this.dragStartMouse.set(event.clientX, event.clientY);
+
+      this.render();
+    }
+
     if (this.isDraggingImage && this.selectedMesh && this.tool === 'move') {
       const dx = event.clientX - this.dragStartMouse.x;
       const dy = event.clientY - this.dragStartMouse.y;
@@ -457,6 +556,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private onPointerUp = (event: PointerEvent) => {
     if (event.button === 0) {
       this.isDraggingImage = false;
+      this.isRotating = false;
       this.draggingCorner = null;
       this.resizingCorner = null;  // Сбрасываем ресайз
     }
@@ -532,25 +632,35 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     if (this.selectedMesh === mesh) return;
 
     // Снимаем старые контролы и углы
+    this.clearRotateHandles(this.selectedMesh);
     this.clearTransform();
     this.selectedMesh = mesh;
 
     if (mesh) {
       if (this.tool === 'distort') {
         this.initDistortHandles(mesh);
-        this.clearResizeHandles(); // скрываем resize при distort
+        this.clearResizeHandles();
+        this.clearRotateHandles(mesh);
       } else if (this.tool === 'scale') {
         this.initResizeHandles(mesh);
         this.clearDistortHandles();
+        this.clearRotateHandles(mesh);
+      } else if (this.tool === 'rotate') {
+        this.initRotateHandles(mesh);
+        this.clearDistortHandles();
+        this.clearResizeHandles();
       } else {
         this.clearResizeHandles();
         this.clearDistortHandles();
+        this.clearRotateHandles(mesh);
         this.initTransform(mesh);
       }
     } else {
       this.resizeControls.setTarget(null);
       this.transformControls.detach();
       this.clearDistortHandles();
+      this.clearRotateHandles(mesh);
+      this.clearResizeHandles();
     }
 
     this.render();
@@ -596,6 +706,11 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.createResizeHandles(mesh);
   }
 
+  private initRotateHandles(mesh: THREE.Mesh) {
+    this.transformControls.detach();
+    this.createRotateHandle(mesh);
+  }
+
   private createResizeHandles(mesh: THREE.Mesh) {
     // Очистить предыдущие ручки
     this.clearResizeHandles();
@@ -638,6 +753,44 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       this.resizeSpheres.push(sphere);
     }
 
+    this.render();
+  }
+
+  private createRotateHandle(mesh: THREE.Mesh) {
+    // Удаляем существующую ручку, если она есть
+    this.clearRotateHandles(mesh);
+
+    // if (this.rotateHandle) {
+    //   mesh.remove(this.rotateHandle);
+    //   this.scene.remove(this.rotateHandle);
+    //   this.rotateHandle = null;
+    // }
+
+    const geometry = new THREE.CircleGeometry(30, 32);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xff0000,
+      transparent: true,
+      opacity: 0.5,
+      depthTest: false
+    });
+
+    this.rotateHandle = new THREE.Mesh(geometry, material);
+    this.rotateHandle.name = 'rotate-handle';
+    this.rotateHandle.renderOrder = 1000;
+
+    // Делаем ручку дочерним объектом меша
+    mesh.add(this.rotateHandle);
+
+    const bbox = new THREE.Box3().setFromObject(mesh);
+    const size = bbox.getSize(new THREE.Vector3());
+
+    this.rotateHandle.position.set(
+      0, // По центру X
+      size.y / 2 + 30, // Над верхним краем
+      0 // По центру Z
+    );
+
+    this.scene.add(mesh);
     this.render();
   }
 
@@ -707,6 +860,22 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
+  private clearRotateHandles(mesh: THREE.Mesh = null) {
+    if (this.rotateHandle) {
+      if (this.selectedMesh) {
+        this.selectedMesh.remove(this.rotateHandle);
+      }
+
+      this.scene.remove(this.rotateHandle);
+      this.rotateHandle = null;
+    }
+
+    this.scene.remove(<THREE.Mesh>this.rotateHandle);
+    this.rotateHandle?.geometry.dispose();
+    (<THREE.Material>this.rotateHandle?.material)?.dispose();
+    this.render();
+  }
+
   private calculatePositionAdjustment(
     cornerIndex: number,
     startPos: THREE.Vector3,
@@ -744,6 +913,39 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       default:
         return startPos;
     }
+  }
+
+  private calculateRotationAngle(event: MouseEvent): number {
+    if (!this.selectedMesh || !this.rotateHandle) return 0;
+
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+
+    // Получаем позицию ротейт-ручки
+    const handleWorldPos = new THREE.Vector3();
+    this.rotateHandle.getWorldPosition(handleWorldPos);
+
+    // Создаем вектор мыши в нормализованных координатах
+    const mouse = new THREE.Vector2(
+      (mouseX / rect.width) * 2 - 1,
+      -(mouseY / rect.height) * 2 + 1
+    );
+
+    // Настраиваем raycaster с текущей камерой
+    this.raycaster.setFromCamera(mouse, this.camera);
+
+    // Получаем позицию мыши в мировых координатах
+    const worldPoint = new THREE.Vector3();
+    this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1)), worldPoint);
+
+    // Вычисляем угол относительно центра ротейт-ручки
+    const angle = Math.atan2(
+      worldPoint.y - handleWorldPos.y,
+      worldPoint.x - handleWorldPos.x
+    );
+
+    return angle;
   }
 
   private updateDistort() {
@@ -792,17 +994,29 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         case 'scale':
           this.initResizeHandles(this.selectedMesh);
           this.clearDistortHandles();
+          this.clearRotateHandles(this.selectedMesh);
+          this.transformControls.detach();
+          break;
+
+        case 'rotate':
+          this.initRotateHandles(this.selectedMesh);
+          this.clearResizeHandles();
+          this.clearDistortHandles();
           this.transformControls.detach();
           break;
 
         case 'distort':
           this.initDistortHandles(this.selectedMesh);
           this.clearResizeHandles();
+          this.clearRotateHandles(this.selectedMesh);
           this.transformControls.detach();
           break;
 
         default:
           this.initTransform(this.selectedMesh);
+          this.clearDistortHandles();
+          this.clearRotateHandles(this.selectedMesh);
+          this.clearResizeHandles();
       }
 
       // if (tool === 'scale') {
@@ -821,6 +1035,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       this.transformControls.detach();
       this.clearResizeHandles();
       this.clearDistortHandles();
+      this.clearRotateHandles(this.selectedMesh);
     }
 
     this.render();

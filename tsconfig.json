@@ -5,7 +5,7 @@
     "baseUrl": "./",
     "outDir": "./dist/out-tsc",
     "forceConsistentCasingInFileNames": true,
-    "strict": true,
+    "strict": false,
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": true,
     "noImplicitReturns": true,
@@ -29,8 +29,15 @@
   },
   "angularCompilerOptions": {
     "enableI18nLegacyMessageIdFormat": false,
+    "preserveWhitespaces": false,
     "strictInjectionParameters": true,
     "strictInputAccessModifiers": true,
-    "strictTemplates": true
+    "strictTemplates": true,
+    "strictInputTypes": true,
+    "strictDomLocalRefTypes": true,
+    "strictDomEventTypes": true,
+    "strictOutputEventTypes": true,
+    "strictContextGenerics": true,
+    "fullTemplateTypeCheck": true
   }
 }

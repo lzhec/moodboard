@@ -755,10 +755,10 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     // Создаем массив векторов с явным указанием типа
     const corners: { x: number, y: number, z: number }[] = [
-      { x: bbox.max.x, y: bbox.min.y, z: 0 }, // верхний левый
-      { x: bbox.min.x, y: bbox.min.y, z: 0 }, // верхний правый
-      { x: bbox.min.x, y: bbox.max.y, z: 0 }, // нижний правый
-      { x: bbox.max.x, y: bbox.max.y, z: 0 }  // нижний левый
+      { x: bbox.max.x, y: bbox.min.y, z: 0 }, // нижний правый
+      { x: bbox.min.x, y: bbox.min.y, z: 0 }, // нижний левый
+      { x: bbox.min.x, y: bbox.max.y, z: 0 }, // верхний левый
+      { x: bbox.max.x, y: bbox.max.y, z: 0 }  // верхний правый
     ];
 
     for (let i = 0; i < 4; i++) {

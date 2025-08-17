@@ -35,16 +35,20 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private resizeStartPos = new THREE.Vector3();
   private resizeStartMouse = new THREE.Vector2();
   private resizeControls!: ResizeBoxControls;
+  private borderLines: THREE.LineLoop[] = [];
+
   // Для дисторшна
   private cornerSpheres: THREE.Mesh[] = [];
   private draggingCorner: THREE.Mesh;
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
   private dragOffset = new THREE.Vector3();
+
   // Для вращения
   private rotateHandle: THREE.Mesh;
   private isRotating = false;
   private rotateStartAngle = 0;
+  private rotateLines: THREE.LineLoop[] = [];
 
   private resizeTimeout: ReturnType<typeof setTimeout>;
   private isPanning = false;
@@ -54,7 +58,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private isDraggingImage = false;
   private dragStartMouse = new THREE.Vector2();
   private dragStartPos = new THREE.Vector3();
-  private borderLines: THREE.LineLoop[] = [];
 
   ngAfterViewInit(): void {
     this.initThree();
@@ -531,6 +534,9 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         );
       }
 
+      this.clearRotateHandles();
+      this.createRotateHandle(this.selectedMesh);
+
       this.render();
     }
 
@@ -805,8 +811,35 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     // Создаем bounding box для всего меша
     const bbox = new THREE.Box3().setFromObject(mesh);
-    const size = bbox.getSize(new THREE.Vector3());
+    const corners: { x: number, y: number, z: number }[] = [
+      { x: bbox.max.x, y: bbox.min.y, z: 0 }, // нижний правый
+      { x: bbox.min.x, y: bbox.min.y, z: 0 }, // нижний левый
+      { x: bbox.min.x, y: bbox.max.y, z: 0 }, // верхний левый
+      { x: bbox.max.x, y: bbox.max.y, z: 0 }  // верхний правый
+    ];
 
+    // Создание бордера
+    const borderMaterial = new THREE.LineBasicMaterial({
+      color: 0xff0000,  // Другой цвет для отличия
+      linewidth: 2
+    });
+
+    const borderGeometry = new THREE.BufferGeometry();
+    const borderPoints = [
+      new THREE.Vector3(corners[0].x, corners[0].y, corners[0].z),
+      new THREE.Vector3(corners[1].x, corners[1].y, corners[1].z),
+      new THREE.Vector3(corners[2].x, corners[2].y, corners[2].z),
+      new THREE.Vector3(corners[3].x, corners[3].y, corners[3].z),
+      new THREE.Vector3(corners[0].x, corners[0].y, corners[0].z)
+    ];
+
+    borderGeometry.setFromPoints(borderPoints);
+    const borderLine = new THREE.LineLoop(borderGeometry, borderMaterial);
+
+    this.scene.add(borderLine);
+    this.rotateLines.push(borderLine);
+
+    // Создание ручки вне бордера
     const geometry = new THREE.CircleGeometry(30, 32);
     const material = new THREE.MeshBasicMaterial({
       color: 0xff0000,
@@ -822,14 +855,14 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     // Позиционируем ручку над верхним краем bounding box
     this.rotateHandle.position.set(
       0, // По центру X
-      size.y / 2 + 30, // Над верхним краем
+      bbox.getSize(new THREE.Vector3()).y / 2 + 30, // Над верхним краем
       0 // По центру Z
     );
 
     // Делаем ручку дочерним объектом меша
     mesh.add(this.rotateHandle);
-    this.scene.add(mesh);
 
+    this.scene.add(mesh);
     this.render();
   }
 
@@ -909,6 +942,14 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   }
 
   private clearRotateHandles(mesh: THREE.Mesh = null) {
+    this.rotateLines.forEach(line => {
+      this.scene.remove(line);
+      line.geometry.dispose();
+      (<THREE.Material>line.material).dispose();
+    });
+
+    this.rotateLines = [];
+
     if (this.rotateHandle) {
       if (this.selectedMesh) {
         this.selectedMesh.remove(this.rotateHandle);

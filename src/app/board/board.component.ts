@@ -606,6 +606,8 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       reader.onload = (e) => {
         const loader = new THREE.TextureLoader();
         loader.load(e.target!.result as string, (texture) => {
+          // Современные настройки текстуры
+          texture.colorSpace = 'srgb'; // Используем строковое значение
           texture.minFilter = THREE.LinearFilter;
           texture.magFilter = THREE.LinearFilter;
           texture.generateMipmaps = false;
@@ -617,7 +619,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
           const geometry = new THREE.PlaneGeometry(imgWidth, imgHeight, segments, segments);
 
-          // Сохраняем параметры, чтобы потом использовать
           geometry.userData = {
             widthSegments: segments,
             heightSegments: segments
@@ -626,7 +627,9 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
           const material = new THREE.MeshBasicMaterial({
             map: texture,
             side: THREE.DoubleSide,
-            transparent: true
+            transparent: true,
+            // color: 0xffffff, // Белый цвет для максимальной яркости
+            // opacity: 1.0 // Полная непрозрачность
           });
 
           const mesh = new THREE.Mesh(geometry, material);
@@ -637,6 +640,8 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
           };
 
           this.addImageLayer(mesh);
+        }, undefined, (error) => {
+          console.error('Ошибка загрузки изображения', error);
         });
       };
       reader.readAsDataURL(file);

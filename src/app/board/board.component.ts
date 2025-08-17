@@ -488,18 +488,47 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     // Проверяем, что мы в режиме поворота и идет процесс вращения
     if (this.tool === 'rotate' && this.isRotating && this.selectedMesh) {
-      const dx = event.clientX - this.dragStartMouse.x;
-      const dy = event.clientY - this.dragStartMouse.y;
+      const rect = this.renderer.domElement.getBoundingClientRect();
 
-      // Замедляем вращение с помощью коэффициента
-      const slowdownFactor = 0.1; // Можно подобрать по вкусу
-      const angleDelta = Math.atan2(dy, dx) * slowdownFactor;
+      // Текущая позиция курсора
+      const currentX = event.clientX - rect.left;
+      const currentY = event.clientY - rect.top;
 
-      // Вращаем mesh вокруг его центра по оси Z
-      this.selectedMesh.rotateZ(angleDelta);
+      // Начальная позиция курсора
+      const startX = this.dragStartMouse.x - rect.left;
+      const startY = this.dragStartMouse.y - rect.top;
 
-      // Обновляем начальную позицию мыши для следующего движения
+      // Вычисляем углы для начальной и текущей позиций
+      const startAngle = Math.atan2(startY - rect.height / 2, startX - rect.width / 2);
+      const currentAngle = Math.atan2(currentY - rect.height / 2, currentX - rect.width / 2);
+
+      // Рассчитываем разницу углов
+      let angleDelta = currentAngle - startAngle;
+
+      // Нормализация угла (предотвращение скачков через 360 градусов)
+      if (angleDelta > Math.PI) angleDelta -= 2 * Math.PI;
+      if (angleDelta < -Math.PI) angleDelta += 2 * Math.PI;
+
+      // Коэффициент для точного контроля
+      const rotationSpeed = 1.0;
+
+      // Вращаем изображение точно на вычисленный угол
+      this.selectedMesh.rotateOnAxis(new THREE.Vector3(0, 0, 1), angleDelta * rotationSpeed);
+
+      // Обновляем начальную позицию мыши
       this.dragStartMouse.set(event.clientX, event.clientY);
+
+      // Обновляем позицию ручки поворота
+      if (this.rotateHandle) {
+        const bbox = new THREE.Box3().setFromObject(this.selectedMesh);
+        const size = bbox.getSize(new THREE.Vector3());
+
+        this.rotateHandle.position.set(
+          0, // По центру X
+          size.y / 2 + 30, // Над верхним краем
+          0 // По центру Z
+        );
+      }
 
       this.render();
     }

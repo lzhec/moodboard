@@ -749,38 +749,24 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     // Очистить предыдущие ручки
     this.clearResizeHandles();
 
-    mesh.updateMatrixWorld(true);
+    const bbox = new THREE.Box3().setFromObject(mesh);
+    const center = bbox.getCenter(new THREE.Vector3());
+    const size = bbox.getSize(new THREE.Vector3());
 
-    const geo = mesh.geometry as THREE.BufferGeometry;
-    const posAttr = geo.attributes['position'] as THREE.BufferAttribute;
-
-    const userData = geo.userData as { widthSegments: number; heightSegments: number };
-    const segmentsX = userData?.widthSegments + 1 || 11;
-    const segmentsY = userData?.heightSegments + 1 || 11;
-
-    // Индексы углов (или можно брать грани по X и Y для resize)
-    // Предположим, что для ресайза — используем 4 угла (можно добавить средние ручки по сторонам, если надо)
-    const cornerIndices = [
-      segmentsX * segmentsY - 1,       // нижний правый
-      segmentsX * (segmentsY - 1),      // нижний левый
-      0,                               // верхний левый
-      segmentsX - 1,                   // верхний правый
-
+    // Создаем массив векторов с явным указанием типа
+    const corners: { x: number, y: number, z: number }[] = [
+      { x: bbox.max.x, y: bbox.min.y, z: 0 }, // верхний левый
+      { x: bbox.min.x, y: bbox.min.y, z: 0 }, // верхний правый
+      { x: bbox.min.x, y: bbox.max.y, z: 0 }, // нижний правый
+      { x: bbox.max.x, y: bbox.max.y, z: 0 }  // нижний левый
     ];
 
     for (let i = 0; i < 4; i++) {
-      const idx = cornerIndices[i];
-      const x = posAttr.getX(idx);
-      const y = posAttr.getY(idx);
-      const localPos = new THREE.Vector3(x, y, 0);
-
-      const worldPos = localPos.clone().applyMatrix4(mesh.matrixWorld);
-
       const sphere = new THREE.Mesh(
         new THREE.SphereGeometry(8, 8, 8),
         new THREE.MeshBasicMaterial({ color: 0x00aaff })
       );
-      sphere.position.copy(worldPos);
+      sphere.position.set(corners[i].x, corners[i].y, corners[i].z);
       sphere.userData['cornerIndex'] = i;
 
       this.scene.add(sphere);

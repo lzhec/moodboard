@@ -23,13 +23,13 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private transformControls!: TransformControls;
 
   meshes: THREE.Mesh[] = [];
-  selectedMesh: THREE.Mesh | null = null;
+  selectedMesh: THREE.Mesh;
 
   tool: 'move' | 'scale' | 'rotate' | 'distort' = 'move';
 
   // Для ресайза
   private resizeSpheres: THREE.Mesh[] = [];
-  private resizingCorner: THREE.Mesh | null = null;
+  private resizingCorner: THREE.Mesh;
   private resizeDragOffset = new THREE.Vector3();
   private resizeStartSize = new THREE.Vector2();
   private resizeStartPos = new THREE.Vector3();
@@ -37,16 +37,16 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private resizeControls!: ResizeBoxControls;
   // Для дисторшна
   private cornerSpheres: THREE.Mesh[] = [];
-  private draggingCorner: THREE.Mesh | null = null;
+  private draggingCorner: THREE.Mesh;
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
   private dragOffset = new THREE.Vector3();
   // Для вращения
-  private rotateHandle: THREE.Mesh | null = null;
+  private rotateHandle: THREE.Mesh;
   private isRotating = false;
   private rotateStartAngle = 0;
 
-  private resizeTimeout: ReturnType<typeof setTimeout> | null = null;
+  private resizeTimeout: ReturnType<typeof setTimeout>;
   private isPanning = false;
   private panStart = new THREE.Vector2();
   private panEnd = new THREE.Vector2();
@@ -54,6 +54,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private isDraggingImage = false;
   private dragStartMouse = new THREE.Vector2();
   private dragStartPos = new THREE.Vector3();
+  private borderLines: THREE.LineLoop[] = [];
 
   ngAfterViewInit(): void {
     this.initThree();
@@ -346,10 +347,10 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     if (this.tool === 'scale' && this.selectedMesh) {
       const resizeIntersects = this.raycaster.intersectObjects(this.resizeSpheres, false);
       if (resizeIntersects.length > 0) {
-        this.resizingCorner = resizeIntersects[0].object as THREE.Mesh;
+        this.resizingCorner = <THREE.Mesh>resizeIntersects[0].object;
 
         // Запоминаем начальные параметры
-        const geo = this.selectedMesh.geometry as THREE.PlaneGeometry;
+        const geo = <THREE.PlaneGeometry>this.selectedMesh.geometry;
         const originalWidth = geo.parameters.width;
         const originalHeight = geo.parameters.height;
 
@@ -365,7 +366,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     if (this.tool === 'distort' && this.selectedMesh) {
       const cornerIntersects = this.raycaster.intersectObjects(this.cornerSpheres, false);
       if (cornerIntersects.length > 0) {
-        this.draggingCorner = cornerIntersects[0].object as THREE.Mesh;
+        this.draggingCorner = <THREE.Mesh>cornerIntersects[0].object;
 
         const intersectPoint = cornerIntersects[0].point.clone();
         const localIntersect = this.selectedMesh.worldToLocal(intersectPoint);
@@ -404,7 +405,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     // 5. Если клик не по выбранному слою, ищем любой меш под курсором и выбираем
     const intersects = this.raycaster.intersectObjects(this.meshes, false);
     if (intersects.length > 0) {
-      this.selectMesh(intersects[0].object as THREE.Mesh);
+      this.selectMesh(<THREE.Mesh>intersects[0].object);
 
       if (this.tool === 'move') {
         this.isDraggingImage = true;
@@ -598,14 +599,14 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   }
 
   onFilesSelected(event: Event) {
-    const input = event.target as HTMLInputElement;
+    const input = <HTMLInputElement>event.target;
     if (!input.files?.length) return;
 
     Array.from(input.files).forEach((file) => {
       const reader = new FileReader();
       reader.onload = (e) => {
         const loader = new THREE.TextureLoader();
-        loader.load(e.target!.result as string, (texture) => {
+        loader.load(<string>e.target!.result, (texture) => {
           // Современные настройки текстуры
           texture.colorSpace = 'srgb'; // Используем строковое значение
           texture.minFilter = THREE.LinearFilter;
@@ -662,7 +663,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render(); // Отрисовать сразу
   }
 
-  selectMesh(mesh: THREE.Mesh | null) {
+  selectMesh(mesh: THREE.Mesh) {
     if (this.selectedMesh === mesh) return;
 
     // Снимаем старые контролы и углы
@@ -753,13 +754,35 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     const center = bbox.getCenter(new THREE.Vector3());
     const size = bbox.getSize(new THREE.Vector3());
 
-    // Создаем массив векторов с явным указанием типа
+    // Создаем массив векторов
     const corners: { x: number, y: number, z: number }[] = [
       { x: bbox.max.x, y: bbox.min.y, z: 0 }, // нижний правый
       { x: bbox.min.x, y: bbox.min.y, z: 0 }, // нижний левый
       { x: bbox.min.x, y: bbox.max.y, z: 0 }, // верхний левый
       { x: bbox.max.x, y: bbox.max.y, z: 0 }  // верхний правый
     ];
+
+    // Рисуем бордер прямоугольника
+    const borderMaterial = new THREE.LineBasicMaterial({
+      color: 0x00aaff,
+      linewidth: 2,
+    });
+
+    const borderGeometry = new THREE.BufferGeometry();
+    const borderPoints = [
+      new THREE.Vector3(corners[0].x, corners[0].y, corners[0].z),
+      new THREE.Vector3(corners[1].x, corners[1].y, corners[1].z),
+      new THREE.Vector3(corners[2].x, corners[2].y, corners[2].z),
+      new THREE.Vector3(corners[3].x, corners[3].y, corners[3].z),
+      new THREE.Vector3(corners[0].x, corners[0].y, corners[0].z) // Замыкаем прямоугольник
+    ];
+
+    borderGeometry.setFromPoints(borderPoints);
+
+    const borderLine = new THREE.LineLoop(borderGeometry, borderMaterial);
+
+    this.scene.add(borderLine);
+    this.borderLines.push(borderLine);
 
     for (let i = 0; i < 4; i++) {
       const sphere = new THREE.Mesh(
@@ -777,14 +800,12 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   }
 
   private createRotateHandle(mesh: THREE.Mesh) {
-    // Удаляем существующую ручку, если она есть
+    // Удаляем существующую ручку
     this.clearRotateHandles(mesh);
 
-    // if (this.rotateHandle) {
-    //   mesh.remove(this.rotateHandle);
-    //   this.scene.remove(this.rotateHandle);
-    //   this.rotateHandle = null;
-    // }
+    // Создаем bounding box для всего меша
+    const bbox = new THREE.Box3().setFromObject(mesh);
+    const size = bbox.getSize(new THREE.Vector3());
 
     const geometry = new THREE.CircleGeometry(30, 32);
     const material = new THREE.MeshBasicMaterial({
@@ -798,19 +819,17 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.rotateHandle.name = 'rotate-handle';
     this.rotateHandle.renderOrder = 1000;
 
-    // Делаем ручку дочерним объектом меша
-    mesh.add(this.rotateHandle);
-
-    const bbox = new THREE.Box3().setFromObject(mesh);
-    const size = bbox.getSize(new THREE.Vector3());
-
+    // Позиционируем ручку над верхним краем bounding box
     this.rotateHandle.position.set(
       0, // По центру X
       size.y / 2 + 30, // Над верхним краем
       0 // По центру Z
     );
 
+    // Делаем ручку дочерним объектом меша
+    mesh.add(this.rotateHandle);
     this.scene.add(mesh);
+
     this.render();
   }
 
@@ -819,10 +838,10 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     mesh.updateMatrixWorld(true);
 
-    const geo = mesh.geometry as THREE.BufferGeometry;
-    const posAttr = geo.attributes['position'] as THREE.BufferAttribute;
+    const geo = <THREE.BufferGeometry>mesh.geometry;
+    const posAttr = <THREE.BufferAttribute>geo.attributes['position'];
 
-    const userData = geo.userData as { widthSegments: number; heightSegments: number };
+    const userData = <{ widthSegments: number; heightSegments: number }>geo.userData;
     const segmentsX = userData?.widthSegments + 1 || 11;
     const segmentsY = userData?.heightSegments + 1 || 11;
 
@@ -864,17 +883,26 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.cornerSpheres.forEach(s => {
       this.scene.remove(s);
       s.geometry.dispose();
-      (s.material as THREE.Material).dispose();
+      (<THREE.Material>s.material).dispose();
     });
     this.cornerSpheres = [];
     this.render();
   }
 
   private clearResizeHandles() {
+    // Удаление бордеров
+    this.borderLines.forEach(line => {
+      this.scene.remove(line);
+      line.geometry.dispose();
+      (<THREE.Material>line.material).dispose();
+    });
+    this.borderLines = [];
+
+    // Удаление сфер
     this.resizeSpheres.forEach(s => {
       this.scene.remove(s);
       s.geometry.dispose();
-      (s.material as THREE.Material).dispose();
+      (<THREE.Material>s.material).dispose();
     });
     this.resizeSpheres = [];
     this.render();
@@ -970,8 +998,8 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
   private updateDistort() {
     if (!this.selectedMesh || this.cornerSpheres.length !== 4) return;
-    const geo = this.selectedMesh.geometry as THREE.BufferGeometry;
-    const posAttr = geo.attributes['position'] as THREE.BufferAttribute;
+    const geo = <THREE.BufferGeometry>this.selectedMesh.geometry;
+    const posAttr = <THREE.BufferAttribute>geo.attributes['position'];
 
     // Четыре угла — сферы в мировой системе
     const c0 = this.cornerSpheres[0].position;
@@ -979,7 +1007,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     const c2 = this.cornerSpheres[2].position;
     const c3 = this.cornerSpheres[3].position;
 
-    const userData: { widthSegments: number; heightSegments: number } = geo.userData as { widthSegments: number; heightSegments: number };
+    const userData: { widthSegments: number; heightSegments: number } = <{ widthSegments: number; heightSegments: number }>geo.userData;
     const segmentsX = userData.widthSegments + 1;
     const segmentsY = userData.heightSegments + 1;
 
@@ -1168,7 +1196,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     this.meshes.forEach(m => {
       m.geometry.dispose();
-      (m.material as THREE.Material).dispose();
+      (<THREE.Material>m.material).dispose();
       this.scene.remove(m);
     });
 

@@ -372,8 +372,14 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         this.draggingCorner = <THREE.Mesh>cornerIntersects[0].object;
 
         const intersectPoint = cornerIntersects[0].point.clone();
-        const localIntersect = this.selectedMesh.worldToLocal(intersectPoint);
-        this.dragOffset.copy(localIntersect).sub(this.draggingCorner.position);
+        this.selectedMesh.updateMatrixWorld(true);
+
+        // всё переводим в ЛОКАЛЬНЫЕ координаты меша
+        const localIntersect = this.selectedMesh.worldToLocal(intersectPoint.clone());
+        const cornerLocal = this.selectedMesh.worldToLocal(this.draggingCorner.position.clone());
+
+        // оффсет считаем в ЛОКАЛЕ
+        this.dragOffset.copy(localIntersect).sub(cornerLocal);
 
         return;
       }
@@ -540,6 +546,39 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       this.render();
     }
 
+    // Логика дисторта
+    if (this.tool === 'distort' && this.draggingCorner && this.selectedMesh) {
+      this.updateMouse(event);
+      this.raycaster.setFromCamera(this.mouse, this.camera);
+
+      this.selectedMesh.updateMatrixWorld(true);
+
+      // плоскость, СОПЛАНАРНАЯ мешу (учитывает его поворот/наклон)
+      const normal = new THREE.Vector3(0, 0, 1)
+        .applyQuaternion(this.selectedMesh.getWorldQuaternion(new THREE.Quaternion()))
+        .normalize();
+      const planePoint = this.selectedMesh.getWorldPosition(new THREE.Vector3());
+      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, planePoint);
+
+      const intersectPoint = new THREE.Vector3();
+      if (!this.raycaster.ray.intersectPlane(plane, intersectPoint)) return;
+
+      // мировую точку -> в ЛОКАЛ меша
+      const localPos = this.selectedMesh.worldToLocal(intersectPoint.clone());
+
+      // учитываем оффсет (в ЛОКАЛЕ)
+      const newLocalPos = localPos.sub(this.dragOffset);
+      newLocalPos.z = 0;
+
+      // обратно в МИР — и обновляем позицию ручки (она ребёнок сцены)
+      const newWorldPos = this.selectedMesh.localToWorld(newLocalPos.clone());
+      this.draggingCorner.position.copy(newWorldPos);
+
+      this.updateDistort();
+      this.render();
+      return;
+    }
+
     if (this.isDraggingImage && this.selectedMesh && this.tool === 'move') {
       const dx = event.clientX - this.dragStartMouse.x;
       const dy = event.clientY - this.dragStartMouse.y;
@@ -563,29 +602,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
       this.render();
       return;
-    }
-
-    if (this.tool === 'distort' && this.draggingCorner && this.selectedMesh) {
-      this.updateMouse(event);
-      this.raycaster.setFromCamera(this.mouse, this.camera);
-
-      const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-      const intersectPoint = new THREE.Vector3();
-
-      if (!this.raycaster.ray.intersectPlane(plane, intersectPoint)) return;
-
-      // Преобразуем мировую точку в локальные координаты меша
-      const localPos = this.selectedMesh.worldToLocal(intersectPoint.clone());
-
-      // Вычитаем оффсет (в локальных координатах)
-      const newLocalPos = localPos.sub(this.dragOffset);
-
-      newLocalPos.z = 0; // чтобы плоскость оставалась XY
-
-      this.draggingCorner.position.copy(newLocalPos);
-
-      this.updateDistort();
-      this.render();
     }
   }
 

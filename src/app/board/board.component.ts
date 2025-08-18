@@ -15,17 +15,15 @@ import { ResizeBoxControls } from './controls/controls';
 })
 export class BoardComponent implements AfterViewInit, OnDestroy {
 
-  @ViewChild('canvasWrapper', { static: true }) canvasWrapper!: ElementRef<HTMLDivElement>;
+  @ViewChild('canvasWrapper', { static: true }) public canvasWrapper: ElementRef<HTMLDivElement>;
 
-  private scene!: THREE.Scene;
-  private camera!: THREE.OrthographicCamera;
-  private renderer!: THREE.WebGLRenderer;
-  private transformControls!: TransformControls;
-
-  meshes: THREE.Mesh[] = [];
-  selectedMesh: THREE.Mesh;
-
-  tool: 'move' | 'scale' | 'rotate' | 'distort' = 'move';
+  private scene: THREE.Scene;
+  private camera: THREE.OrthographicCamera;
+  private renderer: THREE.WebGLRenderer;
+  private transformControls: TransformControls;
+  public meshes: THREE.Mesh[] = [];
+  public selectedMesh: THREE.Mesh;
+  public tool: 'move' | 'scale' | 'rotate' | 'distort' = 'move';
 
   // Для ресайза
   private resizeSpheres: THREE.Mesh[] = [];
@@ -59,7 +57,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private dragStartMouse = new THREE.Vector2();
   private dragStartPos = new THREE.Vector3();
 
-  ngAfterViewInit(): void {
+  public ngAfterViewInit(): void {
     this.initThree();
 
     const wrapper = this.canvasWrapper.nativeElement;
@@ -73,7 +71,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();  // отрисовать первый кадр
   }
 
-  ngOnDestroy(): void {
+  public ngOnDestroy(): void {
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('mouseup', this.onMouseUp);
@@ -82,7 +80,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.dispose();
   }
 
-  private initThree() {
+  private initThree(): void {
     const width = this.canvasWrapper.nativeElement.clientWidth;
     const height = this.canvasWrapper.nativeElement.clientHeight;
 
@@ -138,7 +136,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.setupInteraction();
   }
 
-  private setupInteraction() {
+  private setupInteraction(): void {
     const dom = this.renderer.domElement;
     dom.style.touchAction = 'none';
 
@@ -150,7 +148,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.renderer.domElement.addEventListener('mousedown', this.onMouseDown);
   }
 
-  private removeInteraction() {
+  private removeInteraction(): void {
     const dom = this.renderer.domElement;
     dom.removeEventListener('pointerdown', this.onPointerDown);
     window.removeEventListener('pointermove', this.onPointerMove);
@@ -614,13 +612,13 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  private updateMouse(event: PointerEvent) {
+  private updateMouse(event: PointerEvent): void {
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   }
 
-  onFilesSelected(event: Event) {
+  public onFilesSelected(event: Event): void {
     const input = <HTMLInputElement>event.target;
     if (!input.files?.length) return;
 
@@ -671,7 +669,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     });
   }
 
-  private addImageLayer(mesh: THREE.Mesh) {
+  private addImageLayer(mesh: THREE.Mesh): void {
     // Центрируем в середине экрана камеры
     const camWidth = this.camera.right - this.camera.left;
     const camHeight = this.camera.top - this.camera.bottom;
@@ -685,7 +683,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render(); // Отрисовать сразу
   }
 
-  selectMesh(mesh: THREE.Mesh) {
+  public selectMesh(mesh: THREE.Mesh): void {
     if (this.selectedMesh === mesh) return;
 
     // Снимаем старые контролы и углы
@@ -723,12 +721,12 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  private clearTransform() {
+  private clearTransform(): void {
     this.transformControls.detach();
     this.clearDistortHandles();
   }
 
-  private initTransform(mesh: THREE.Mesh) {
+  private initTransform(mesh: THREE.Mesh): void {
     this.clearDistortHandles();
     this.transformControls.attach(mesh);
 
@@ -753,22 +751,22 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     // Внимание: слушатель objectChange больше не добавляем здесь
   }
 
-  private initDistortHandles(mesh: THREE.Mesh) {
+  private initDistortHandles(mesh: THREE.Mesh): void {
     this.transformControls.detach();
     this.createDistortHandles(mesh);
   }
 
-  private initResizeHandles(mesh: THREE.Mesh) {
+  private initResizeHandles(mesh: THREE.Mesh): void {
     this.transformControls.detach();
     this.createResizeHandles(mesh);
   }
 
-  private initRotateHandles(mesh: THREE.Mesh) {
+  private initRotateHandles(mesh: THREE.Mesh): void {
     this.transformControls.detach();
     this.createRotateHandle(mesh);
   }
 
-  private createResizeHandles(mesh: THREE.Mesh) {
+  private createResizeHandles(mesh: THREE.Mesh): void {
     // Очистить предыдущие ручки
     this.clearResizeHandles();
 
@@ -819,7 +817,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  private createRotateHandle(mesh: THREE.Mesh) {
+  private createRotateHandle(mesh: THREE.Mesh): void {
     // Удаляем существующую ручку
     this.clearRotateHandles(mesh);
 
@@ -880,7 +878,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  private createDistortHandles(mesh: THREE.Mesh) {
+  private createDistortHandles(mesh: THREE.Mesh): void {
     this.clearDistortHandles();
 
     mesh.updateMatrixWorld(true);
@@ -924,7 +922,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  private clearDistortHandles() {
+  private clearDistortHandles(): void {
     this.cornerSpheres.forEach(s => {
       this.scene.remove(s);
       s.geometry.dispose();
@@ -934,7 +932,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  private clearResizeHandles() {
+  private clearResizeHandles(): void {
     // Удаление бордеров
     this.borderLines.forEach(line => {
       this.scene.remove(line);
@@ -953,7 +951,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  private clearRotateHandles(mesh: THREE.Mesh = null) {
+  private clearRotateHandles(mesh: THREE.Mesh = null): void {
     this.rotateLines.forEach(line => {
       this.scene.remove(line);
       line.geometry.dispose();
@@ -1049,7 +1047,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     return angle;
   }
 
-  private updateDistort() {
+  private updateDistort(): void {
     if (!this.selectedMesh || this.cornerSpheres.length !== 4) return;
     const geo = <THREE.BufferGeometry>this.selectedMesh.geometry;
     const posAttr = <THREE.BufferAttribute>geo.attributes['position'];
@@ -1107,7 +1105,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     geo.computeVertexNormals();
   }
 
-  setTool(tool: 'move' | 'scale' | 'rotate' | 'distort', checkCurrentTool = true) {
+  public setTool(tool: 'move' | 'scale' | 'rotate' | 'distort', checkCurrentTool = true): void {
     if (checkCurrentTool && this.tool === tool) {
       return;
     }
@@ -1166,7 +1164,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  flipSelected(axis: 'x' | 'y') {
+  public flipSelected(axis: 'x' | 'y'): void {
     if (!this.selectedMesh) {
       return
     };
@@ -1209,7 +1207,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  deleteSelected() {
+  public deleteSelected(): void {
     if (!this.selectedMesh) return;
 
     this.clearTransform();
@@ -1222,7 +1220,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  moveLayerUp() {
+  public moveLayerUp(): void {
     if (!this.selectedMesh) {
       return;
     }
@@ -1235,7 +1233,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  moveLayerDown() {
+  public moveLayerDown(): void {
     if (!this.selectedMesh) {
       return;
     }
@@ -1248,7 +1246,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  private swapLayers(i1: number, i2: number) {
+  private swapLayers(i1: number, i2: number): void {
     const m1 = this.meshes[i1];
     const m2 = this.meshes[i2];
 
@@ -1260,7 +1258,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.meshes[i2] = m1;
   }
 
-  private render() {
+  private render(): void {
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -1283,7 +1281,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  private updateCamera(w: number, h: number) {
+  private updateCamera(w: number, h: number): void {
     this.camera.left = 0;
     this.camera.right = w;
     this.camera.top = h;
@@ -1291,7 +1289,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.camera.updateProjectionMatrix();
   }
 
-  private dispose() {
+  private dispose(): void {
     this.removeInteraction();
 
     // Убираем все слушатели transformControls перед dispose

@@ -1107,8 +1107,11 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     geo.computeVertexNormals();
   }
 
-  setTool(tool: 'move' | 'scale' | 'rotate' | 'distort') {
-    if (this.tool === tool) return;
+  setTool(tool: 'move' | 'scale' | 'rotate' | 'distort', checkCurrentTool = true) {
+    if (checkCurrentTool && this.tool === tool) {
+      return;
+    }
+
     this.tool = tool;
 
     if (this.selectedMesh) {
@@ -1174,7 +1177,10 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       this.selectedMesh.scale.y *= -1;
     }
 
-    this.render();
+    // пересоздаем активный инструмент
+    if (this.tool) {
+      this.setTool(this.tool, false);
+    }
   }
 
   deleteSelected() {

@@ -1171,15 +1171,41 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       return
     };
 
-    if (axis === 'x') {
-      this.selectedMesh.scale.x *= -1;
+    // 1) Берём глобальный bbox и его центр
+    const box = new THREE.Box3().setFromObject(this.selectedMesh);
+    const c = box.getCenter(new THREE.Vector3());
+
+    // 2) Строим матрицу отражения относительно центра bbox
+    const t1 = new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z);
+    const s = new THREE.Matrix4().makeScale(axis === 'x' ? -1 : 1, axis === 'y' ? -1 : 1, 1);
+    const t2 = new THREE.Matrix4().makeTranslation(c.x, c.y, c.z);
+    const reflect = new THREE.Matrix4().multiplyMatrices(t2, s).multiply(t1);
+
+    // 3) Применяем к глобальной матрице меша
+    const world = this.selectedMesh.matrixWorld.clone();
+    const newWorld = new THREE.Matrix4().multiplyMatrices(reflect, world);
+
+    // 4) Переводим в локальные координаты относительно родителя
+    const parentInv = new THREE.Matrix4();
+    if (this.selectedMesh.parent) {
+      parentInv.copy(this.selectedMesh.parent.matrixWorld).invert();
     } else {
-      this.selectedMesh.scale.y *= -1;
+      parentInv.identity();
     }
+    const newLocal = new THREE.Matrix4().multiplyMatrices(parentInv, newWorld);
+
+    // 5) Декомпозиция -> position / quaternion / scale
+    newLocal.decompose(
+      this.selectedMesh.position,
+      this.selectedMesh.quaternion,
+      this.selectedMesh.scale,
+    );
 
     // пересоздаем активный инструмент
     if (this.tool) {
       this.setTool(this.tool, false);
+    } else {
+      this.render();
     }
   }
 

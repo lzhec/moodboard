@@ -757,8 +757,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.clearResizeHandles();
 
     const bbox = new THREE.Box3().setFromObject(mesh);
-    const center = bbox.getCenter(new THREE.Vector3());
-    const size = bbox.getSize(new THREE.Vector3());
 
     // Создаем массив векторов
     const corners: { x: number, y: number, z: number }[] = [
@@ -874,11 +872,11 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     const geo = <THREE.BufferGeometry>mesh.geometry;
     const posAttr = <THREE.BufferAttribute>geo.attributes['position'];
 
-    const userData = <{ widthSegments: number; heightSegments: number }>geo.userData;
-    const segmentsX = userData?.widthSegments + 1 || 11;
-    const segmentsY = userData?.heightSegments + 1 || 11;
+    const userData: { widthSegments: number; heightSegments: number } = <{ widthSegments: number; heightSegments: number }>geo.userData;
+    const segmentsX = userData.widthSegments + 1;
+    const segmentsY = userData.heightSegments + 1;
 
-    // Индексы 4 углов
+    // Точные индексы углов в исходной геометрии
     const cornerIndices = [
       0,                           // верхний левый
       segmentsX - 1,               // верхний правый
@@ -886,15 +884,13 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       segmentsX * (segmentsY - 1)  // нижний левый
     ];
 
-    // Чистим массив
-    this.cornerSpheres = [];
+    this.cornerSpheres = cornerIndices.map((idx, i) => {
+      // Получаем локальные координаты угловой вершины
+      const localX = posAttr.getX(idx);
+      const localY = posAttr.getY(idx);
+      const localPos = new THREE.Vector3(localX, localY, 0);
 
-    for (let i = 0; i < 4; i++) {
-      const idx = cornerIndices[i];
-      const x = posAttr.getX(idx);
-      const y = posAttr.getY(idx);
-      const localPos = new THREE.Vector3(x, y, 0);
-
+      // Преобразуем в мировые координаты с учетом всех трансформаций
       const worldPos = localPos.clone().applyMatrix4(mesh.matrixWorld);
 
       const sphere = new THREE.Mesh(
@@ -903,11 +899,11 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       );
       sphere.position.copy(worldPos);
       sphere.userData['cornerIndex'] = i;
+      sphere.userData['originalLocalPosition'] = localPos.clone(); // Сохраняем оригинальную локальную позицию
 
-      // Добавляем сферу в сцену
       this.scene.add(sphere);
-      this.cornerSpheres.push(sphere);
-    }
+      return sphere;
+    });
 
     this.render();
   }
@@ -1042,34 +1038,55 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     const geo = <THREE.BufferGeometry>this.selectedMesh.geometry;
     const posAttr = <THREE.BufferAttribute>geo.attributes['position'];
 
-    // Четыре угла — сферы в мировой системе
-    const c0 = this.cornerSpheres[0].position;
-    const c1 = this.cornerSpheres[1].position;
-    const c2 = this.cornerSpheres[2].position;
-    const c3 = this.cornerSpheres[3].position;
-
     const userData: { widthSegments: number; heightSegments: number } = <{ widthSegments: number; heightSegments: number }>geo.userData;
     const segmentsX = userData.widthSegments + 1;
     const segmentsY = userData.heightSegments + 1;
 
-    // Получаем позицию меша
-    const meshPos = this.selectedMesh.position;
+    // Получаем текущие позиции сфер в мировых координатах
+    const worldCorners = this.cornerSpheres.map(sphere => sphere.position.clone());
 
+    // Создаем обратную матрицу для преобразования
+    const inverseMatrix = new THREE.Matrix4().copy(this.selectedMesh.matrixWorld).invert();
+
+    // Получаем оригинальные локальные позиции углов
+    const originalCorners = [
+      new THREE.Vector3(posAttr.getX(0), posAttr.getY(0), 0),
+      new THREE.Vector3(posAttr.getX(segmentsX - 1), posAttr.getY(segmentsX - 1), 0),
+      new THREE.Vector3(posAttr.getX(segmentsX * segmentsY - 1), posAttr.getY(segmentsX * segmentsY - 1), 0),
+      new THREE.Vector3(posAttr.getX(segmentsX * (segmentsY - 1)), posAttr.getY(segmentsX * (segmentsY - 1)), 0)
+    ];
+
+    // Интерполируем все вершины
     for (let y = 0; y < segmentsY; y++) {
       const t = y / (segmentsY - 1);
-      const left = new THREE.Vector3().lerpVectors(c0, c3, t);
-      const right = new THREE.Vector3().lerpVectors(c1, c2, t);
+      const left = new THREE.Vector3().lerpVectors(worldCorners[0], worldCorners[3], t);
+      const right = new THREE.Vector3().lerpVectors(worldCorners[1], worldCorners[2], t);
 
       for (let x = 0; x < segmentsX; x++) {
         const s = x / (segmentsX - 1);
         const posWorld = new THREE.Vector3().lerpVectors(left, right, s);
 
-        // Переводим из мировой системы в локальную (позиция вершины относительно меша)
-        const posLocal = posWorld.clone().sub(meshPos);
+        // Преобразуем в локальные координаты
+        const localPos = posWorld.clone().applyMatrix4(inverseMatrix);
 
-        posAttr.setXYZ(y * segmentsX + x, posLocal.x, posLocal.y, posLocal.z);
+        // Используем оригинальные локальные координаты как базу
+        const originalLocalPos = new THREE.Vector3(
+          originalCorners[0].x + (originalCorners[1].x - originalCorners[0].x) * s,
+          originalCorners[0].y + (originalCorners[3].y - originalCorners[0].y) * t,
+          0
+        );
+
+        // Смешиваем оригинальную и новую позиции
+        const finalLocalPos = new THREE.Vector3(
+          localPos.x,
+          localPos.y,
+          0
+        );
+
+        posAttr.setXYZ(y * segmentsX + x, finalLocalPos.x, finalLocalPos.y, finalLocalPos.z);
       }
     }
+
     posAttr.needsUpdate = true;
     geo.computeVertexNormals();
   }
@@ -1081,31 +1098,31 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     if (this.selectedMesh) {
       switch (tool) {
         case 'scale':
-          this.initResizeHandles(this.selectedMesh);
           this.clearDistortHandles();
           this.clearRotateHandles(this.selectedMesh);
           this.transformControls.detach();
+          this.initResizeHandles(this.selectedMesh);
           break;
 
         case 'rotate':
-          this.initRotateHandles(this.selectedMesh);
           this.clearResizeHandles();
           this.clearDistortHandles();
           this.transformControls.detach();
+          this.initRotateHandles(this.selectedMesh);
           break;
 
         case 'distort':
-          this.initDistortHandles(this.selectedMesh);
           this.clearResizeHandles();
           this.clearRotateHandles(this.selectedMesh);
           this.transformControls.detach();
+          this.initDistortHandles(this.selectedMesh);
           break;
 
         default:
-          this.initTransform(this.selectedMesh);
           this.clearDistortHandles();
           this.clearRotateHandles(this.selectedMesh);
           this.clearResizeHandles();
+          this.initTransform(this.selectedMesh);
       }
 
       // if (tool === 'scale') {
@@ -1121,10 +1138,10 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       //   }
       // }
     } else {
-      this.transformControls.detach();
       this.clearResizeHandles();
       this.clearDistortHandles();
       this.clearRotateHandles(this.selectedMesh);
+      this.transformControls.detach();
     }
 
     this.render();

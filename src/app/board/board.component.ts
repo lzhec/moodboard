@@ -818,16 +818,23 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   }
 
   private createRotateHandle(mesh: THREE.Mesh): void {
-    // Удаляем существующую ручку
+    // Удаляем существующие бордеры и ручку
     this.clearRotateHandles(mesh);
 
-    // Создаем bounding box для всего меша
-    const bbox = new THREE.Box3().setFromObject(mesh);
-    const corners: { x: number, y: number, z: number }[] = [
-      { x: bbox.max.x, y: bbox.min.y, z: 0 }, // нижний правый
-      { x: bbox.min.x, y: bbox.min.y, z: 0 }, // нижний левый
-      { x: bbox.min.x, y: bbox.max.y, z: 0 }, // верхний левый
-      { x: bbox.max.x, y: bbox.max.y, z: 0 }  // верхний правый
+    // Берем реальные размеры меша
+    const geo = mesh.geometry as THREE.BufferGeometry;
+    geo.computeBoundingBox();
+    const bbox = geo.boundingBox.clone(); // локальный bbox
+
+    // Переводим bbox в мировые координаты
+    bbox.applyMatrix4(mesh.matrixWorld);
+
+    // Четыре угла
+    const corners = [
+      new THREE.Vector3(bbox.max.x, bbox.min.y, 0), // нижний правый
+      new THREE.Vector3(bbox.min.x, bbox.min.y, 0), // нижний левый
+      new THREE.Vector3(bbox.min.x, bbox.max.y, 0), // верхний левый
+      new THREE.Vector3(bbox.max.x, bbox.max.y, 0), // верхний правый
     ];
 
     // Создание бордера
@@ -836,45 +843,36 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       linewidth: 2
     });
 
-    const borderGeometry = new THREE.BufferGeometry();
-    const borderPoints = [
-      new THREE.Vector3(corners[0].x, corners[0].y, corners[0].z),
-      new THREE.Vector3(corners[1].x, corners[1].y, corners[1].z),
-      new THREE.Vector3(corners[2].x, corners[2].y, corners[2].z),
-      new THREE.Vector3(corners[3].x, corners[3].y, corners[3].z),
-      new THREE.Vector3(corners[0].x, corners[0].y, corners[0].z)
-    ];
+    const borderGeometry = new THREE.BufferGeometry().setFromPoints([
+      corners[0], corners[1], corners[2], corners[3], corners[0]
+    ]);
 
-    borderGeometry.setFromPoints(borderPoints);
     const borderLine = new THREE.LineLoop(borderGeometry, borderMaterial);
+    borderLine.name = 'rotate-border';
+    borderLine.renderOrder = 1000;
+    // borderLine.position.set(0, 0, 0);
 
     this.scene.add(borderLine);
     this.rotateLines.push(borderLine);
 
-    // Создание ручки вне бордера
+    // Ручка
     const geometry = new THREE.CircleGeometry(30, 32);
-    const material = new THREE.MeshBasicMaterial({
-      color: 0xff0000,
-      transparent: true,
-      opacity: 0.5,
-      depthTest: false
-    });
-
+    const material = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.5, depthTest: false });
     this.rotateHandle = new THREE.Mesh(geometry, material);
     this.rotateHandle.name = 'rotate-handle';
     this.rotateHandle.renderOrder = 1000;
 
     // Позиционируем ручку над верхним краем bounding box
+    const bboxHeight = bbox.max.y - bbox.min.y;
     this.rotateHandle.position.set(
-      0, // По центру X
-      bbox.getSize(new THREE.Vector3()).y / 2 + 30, // Над верхним краем
-      0 // По центру Z
+      0,               // по центру X
+      bboxHeight / 2 + 30, // над верхним краем
+      0                // по центру Z
     );
 
-    // Делаем ручку дочерним объектом меша
+    // Добавляем ручку как дочерний объект меша
     mesh.add(this.rotateHandle);
 
-    this.scene.add(mesh);
     this.render();
   }
 
@@ -1117,14 +1115,12 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         case 'scale':
           this.clearDistortHandles();
           this.clearRotateHandles(this.selectedMesh);
-          this.transformControls.detach();
           this.initResizeHandles(this.selectedMesh);
           break;
 
         case 'rotate':
           this.clearResizeHandles();
           this.clearDistortHandles();
-          this.transformControls.detach();
           this.initRotateHandles(this.selectedMesh);
           break;
 

@@ -350,12 +350,12 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       if (resizeIntersects.length > 0) {
         this.resizingCorner = <THREE.Mesh>resizeIntersects[0].object;
 
-        // Запоминаем начальные параметры
+        // Запоминаем начальные параметры с учётом текущего scale
         const geo = <THREE.PlaneGeometry>this.selectedMesh.geometry;
         const originalWidth = geo.parameters.width;
         const originalHeight = geo.parameters.height;
 
-        this.resizeStartSize.set(originalWidth, originalHeight);
+        this.resizeStartSize.set(originalWidth * this.selectedMesh.scale.x, originalHeight * this.selectedMesh.scale.y);
         this.resizeStartPos.copy(this.selectedMesh.position);
         this.resizeStartMouse.set(event.clientX, event.clientY);
 
@@ -431,50 +431,33 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       const dx = event.clientX - this.resizeStartMouse.x;
       const dy = event.clientY - this.resizeStartMouse.y;
 
-      const camWidth = this.camera.right - this.camera.left;
-      const camHeight = this.camera.top - this.camera.bottom;
       const wrapper = this.canvasWrapper.nativeElement;
       const wrapperWidth = wrapper.clientWidth;
       const wrapperHeight = wrapper.clientHeight;
 
       const cornerIndex = this.resizingCorner.userData['cornerIndex'];
 
-      // Инвертируем dx и dy для специфических углов
-      let scaleDx = dx;
-      let scaleDy = dy;
+      // Переводим движение мыши в изменение размера
+      let deltaX = dx / wrapperWidth * this.resizeStartSize.x * 2;
+      let deltaY = dy / wrapperHeight * this.resizeStartSize.y * 2;
 
+      // Инвертируем для нужных углов
       switch (cornerIndex) {
-        case 1: // левый нижний - инвертируем dx
-          scaleDx = -dx;
-          break;
-        case 2: // правый нижний - инвертируем dx и dy
-          scaleDx = -dx;
-          scaleDy = -dy;
-          break;
-        case 3: // правый верхний - инвертируем dy
-          scaleDy = -dy;
-          break;
+        case 1: deltaX = -deltaX; break;           // левый нижний
+        case 2: deltaX = -deltaX; deltaY = -deltaY; break; // правый нижний
+        case 3: deltaY = -deltaY; break;           // правый верхний
       }
 
-      // Коэффициент масштабирования
-      const scaleX = 1 + scaleDx / wrapperWidth * 2;
-      const scaleY = 1 + scaleDy / wrapperHeight * 2;
-
       // Новые размеры
-      const newWidth = this.resizeStartSize.x * scaleX;
-      const newHeight = this.resizeStartSize.y * scaleY;
+      const newWidth = this.resizeStartSize.x + deltaX;
+      const newHeight = this.resizeStartSize.y + deltaY;
 
-      // Пересоздаем геометрию
-      const segments = 10;
-      const newGeometry = new THREE.PlaneGeometry(newWidth, newHeight, segments, segments);
-      newGeometry.userData = {
-        widthSegments: segments,
-        heightSegments: segments
-      };
+      const geo = <THREE.PlaneGeometry>this.selectedMesh.geometry;
+      const baseW = geo.parameters.width;
+      const baseH = geo.parameters.height;
 
-      // Обновляем геометрию и позицию
-      this.selectedMesh.geometry.dispose();
-      this.selectedMesh.geometry = newGeometry;
+      this.selectedMesh.scale.x = newWidth / baseW;
+      this.selectedMesh.scale.y = newHeight / baseH;
 
       // Корректируем позицию в зависимости от угла
       const positionAdjustment = this.calculatePositionAdjustment(
@@ -483,10 +466,9 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         this.resizeStartSize,
         new THREE.Vector2(newWidth, newHeight)
       );
-
       this.selectedMesh.position.copy(positionAdjustment);
 
-      // Обновляем ручки ресайза
+      // Обновляем ручки
       this.clearResizeHandles();
       this.createResizeHandles(this.selectedMesh);
 
@@ -802,6 +784,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.scene.add(borderLine);
     this.borderLines.push(borderLine);
 
+    // Ручки по углам
     for (let i = 0; i < 4; i++) {
       const sphere = new THREE.Mesh(
         new THREE.SphereGeometry(8, 8, 8),
@@ -822,7 +805,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.clearRotateHandles(mesh);
 
     // Берем реальные размеры меша
-    const geo = mesh.geometry as THREE.BufferGeometry;
+    const geo = mesh.geometry;
     geo.computeBoundingBox();
     const bbox = geo.boundingBox.clone(); // локальный bbox
 

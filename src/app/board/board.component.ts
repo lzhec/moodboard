@@ -6,6 +6,7 @@ import {
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { ResizeBoxControls } from './controls/controls';
+import { fromEvent, map, Observable, of, switchMap, take, takeUntil, zip } from 'rxjs';
 
 @Component({
   selector: 'app-board',
@@ -72,11 +73,13 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   }
 
   public ngOnDestroy(): void {
+    const dom = this.renderer.domElement;
+
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('mouseup', this.onMouseUp);
-    this.renderer.domElement.removeEventListener('mousedown', this.onMouseDown);
-    this.renderer.domElement.removeEventListener('wheel', this.onWheel);
+    dom.removeEventListener('mousedown', this.onMouseDown);
+    dom.removeEventListener('wheel', this.onWheel);
     this.dispose();
   }
 
@@ -140,22 +143,42 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     const dom = this.renderer.domElement;
     dom.style.touchAction = 'none';
 
-    dom.addEventListener('pointerdown', this.onPointerDown);
-    window.addEventListener('pointermove', this.onPointerMove);
-    window.addEventListener('pointerup', this.onPointerUp);
+    const pointerDown$ = fromEvent<PointerEvent>(dom, 'pointerdown');
+    const pointerMove$ = fromEvent<PointerEvent>(window, 'pointermove');
+    const pointerUp$ = fromEvent<PointerEvent>(window, 'pointerup');
+
     window.addEventListener('mousemove', this.onMouseMove);
     window.addEventListener('mouseup', this.onMouseUp);
-    this.renderer.domElement.addEventListener('mousedown', this.onMouseDown);
+    dom.addEventListener('mousedown', this.onMouseDown);
+
+    pointerDown$
+      .pipe(
+        switchMap((event: PointerEvent) => this.onPointerDown(event).pipe(
+          switchMap((someData: any) => {
+            return pointerMove$.pipe(
+              switchMap((event) => this.onPointerMove(event, someData)),
+              takeUntil(pointerUp$));
+          })
+        )),
+        takeUntil(fromEvent(dom, 'destroy')),
+      )
+      .subscribe();
+
+    pointerUp$
+      .pipe(
+        takeUntil(fromEvent(dom, 'destroy')),
+        switchMap((event: PointerEvent) => this.onPointerUp(event)),
+      )
+      .subscribe();
+
   }
 
   private removeInteraction(): void {
     const dom = this.renderer.domElement;
-    dom.removeEventListener('pointerdown', this.onPointerDown);
-    window.removeEventListener('pointermove', this.onPointerMove);
-    window.removeEventListener('pointerup', this.onPointerUp);
+
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('mouseup', this.onMouseUp);
-    this.renderer.domElement.removeEventListener('mousedown', this.onMouseDown);
+    dom.removeEventListener('mousedown', this.onMouseDown);
   }
 
   private onWheel = (event: WheelEvent) => {
@@ -340,7 +363,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  private onPointerDown = (event: PointerEvent) => {
+  private onPointerDown(event: PointerEvent): Observable<any> {
     this.updateMouse(event);
     this.raycaster.setFromCamera(this.mouse, this.camera);
 
@@ -359,7 +382,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         this.resizeStartPos.copy(this.selectedMesh.position);
         this.resizeStartMouse.set(event.clientX, event.clientY);
 
-        return;
+        return of(null);
       }
     }
 
@@ -379,7 +402,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         // оффсет считаем в ЛОКАЛЕ
         this.dragOffset.copy(localIntersect).sub(cornerLocal);
 
-        return;
+        return of(null);
       }
     }
 
@@ -391,7 +414,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         this.rotateStartAngle = this.calculateRotationAngle(event);
         this.dragStartMouse.set(event.clientX, event.clientY);
         event.preventDefault();
-        return;
+        return of(null);
       }
     }
 
@@ -405,7 +428,8 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
           this.dragStartPos.copy(this.selectedMesh.position);
           event.preventDefault();
         }
-        return; // Кликнули по выбранному слою — ничего менять не нужно
+
+        return of(null); // Кликнули по выбранному слою — ничего менять не нужно
       }
     }
 
@@ -423,9 +447,11 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     } else {
       this.selectMesh(null);
     }
+
+    return of(null);
   }
 
-  private onPointerMove = (event: PointerEvent) => {
+  private onPointerMove(event: PointerEvent, someData: any): Observable<any> {
     // Логика ресайза
     if (this.tool === 'scale' && this.resizingCorner && this.selectedMesh) {
       const dx = event.clientX - this.resizeStartMouse.x;
@@ -473,7 +499,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       this.createResizeHandles(this.selectedMesh);
 
       this.render();
-      return;
+      return of(null);
     }
 
     // Проверяем, что мы в режиме поворота и идет процесс вращения
@@ -541,7 +567,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, planePoint);
 
       const intersectPoint = new THREE.Vector3();
-      if (!this.raycaster.ray.intersectPlane(plane, intersectPoint)) return;
+      if (!this.raycaster.ray.intersectPlane(plane, intersectPoint)) return of(null);
 
       // мировую точку -> в ЛОКАЛ меша
       const localPos = this.selectedMesh.worldToLocal(intersectPoint.clone());
@@ -556,7 +582,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
       this.updateDistort();
       this.render();
-      return;
+      return of(null);
     }
 
     if (this.isDraggingImage && this.selectedMesh && this.tool === 'move') {
@@ -581,17 +607,20 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       );
 
       this.render();
-      return;
     }
+
+    return of(null);
   }
 
-  private onPointerUp = (event: PointerEvent) => {
+  private onPointerUp(event: PointerEvent): Observable<void> {
     if (event.button === 0) {
       this.isDraggingImage = false;
       this.isRotating = false;
       this.draggingCorner = null;
       this.resizingCorner = null;  // Сбрасываем ресайз
     }
+
+    return of(null);
   }
 
   private updateMouse(event: PointerEvent): void {

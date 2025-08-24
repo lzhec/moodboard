@@ -8,6 +8,15 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { ResizeBoxControls } from './controls/controls';
 import { fromEvent, map, Observable, of, switchMap, take, takeUntil, zip } from 'rxjs';
 
+type Tool = 'move' | 'scale' | 'rotate' | 'distort';
+
+interface CustomPointerEvent {
+  tool: Tool;
+  activeIndex: number;
+  anchorIndex: number;
+  anchorWorld: THREE.Vector3;
+}
+
 @Component({
   selector: 'app-board',
   templateUrl: './board.component.html',
@@ -24,7 +33,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private transformControls: TransformControls;
   public meshes: THREE.Mesh[] = [];
   public selectedMesh: THREE.Mesh;
-  public tool: 'move' | 'scale' | 'rotate' | 'distort' = 'move';
+  public tool: Tool = 'move';
 
   // Для ресайза
   private resizeSpheres: THREE.Mesh[] = [];
@@ -363,7 +372,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  private onPointerDown(event: PointerEvent): Observable<any> {
+  private onPointerDown(event: PointerEvent): Observable<CustomPointerEvent> {
     this.updateMouse(event);
     this.raycaster.setFromCamera(this.mouse, this.camera);
 
@@ -382,7 +391,17 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         this.resizeStartPos.copy(this.selectedMesh.position);
         this.resizeStartMouse.set(event.clientX, event.clientY);
 
-        return of(null);
+        // Якорь — противолежащий угол
+        const activeIndex = this.resizeSpheres.indexOf(this.resizingCorner);
+        const anchorIndex = (activeIndex + 2) % 4;
+        const anchorWorld = this.resizeSpheres[anchorIndex].position.clone(); // уже в мировых координатах
+
+        return of({
+          tool: 'scale',
+          activeIndex,
+          anchorIndex,
+          anchorWorld,
+        });
       }
     }
 
@@ -451,7 +470,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     return of(null);
   }
 
-  private onPointerMove(event: PointerEvent, someData: any): Observable<any> {
+  private onPointerMove(event: PointerEvent, data: CustomPointerEvent): Observable<any> {
     // Логика ресайза
     if (this.tool === 'scale' && this.resizingCorner && this.selectedMesh) {
       const dx = event.clientX - this.resizeStartMouse.x;
@@ -469,9 +488,16 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
       // Инвертируем для нужных углов
       switch (cornerIndex) {
-        case 1: deltaX = -deltaX; break;           // левый нижний
-        case 2: deltaX = -deltaX; deltaY = -deltaY; break; // правый нижний
-        case 3: deltaY = -deltaY; break;           // правый верхний
+        case 1:
+          deltaX = -deltaX;
+          break;  // левый нижний
+        case 2:
+          deltaX = -deltaX;
+          deltaY = -deltaY;
+          break;  // правый нижний
+        case 3:
+          deltaY = -deltaY;
+          break;  // правый верхний
       }
 
       // Новые размеры
@@ -485,20 +511,40 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       this.selectedMesh.scale.x = newWidth / baseW;
       this.selectedMesh.scale.y = newHeight / baseH;
 
-      // Корректируем позицию в зависимости от угла
-      const positionAdjustment = this.calculatePositionAdjustment(
-        cornerIndex,
-        this.resizeStartPos,
-        this.resizeStartSize,
-        new THREE.Vector2(newWidth, newHeight)
-      );
-      this.selectedMesh.position.copy(positionAdjustment);
+      // фиксируем противолежащий угол
+      const activeIndex: number = data?.activeIndex ?? cornerIndex;
+      const anchorIndex: number = data?.anchorIndex ?? ((activeIndex + 2) % 4);
+      const anchorWorld: THREE.Vector3 = data?.anchorWorld ?? null;
+
+      // Пересчитываем bbox после масштаба
+      const newBbox = new THREE.Box3().setFromObject(this.selectedMesh);
+
+      // Порядок углов тот же, что и при создании ручек:
+      // 0 — нижний правый (BR), 1 — нижний левый (BL), 2 — верхний левый (TL), 3 — верхний правый (TR)
+      const newCorners = [
+        new THREE.Vector3(newBbox.max.x, newBbox.min.y, 0), // BR
+        new THREE.Vector3(newBbox.min.x, newBbox.min.y, 0), // BL
+        new THREE.Vector3(newBbox.min.x, newBbox.max.y, 0), // TL
+        new THREE.Vector3(newBbox.max.x, newBbox.max.y, 0)  // TR
+      ];
+
+      // Если есть сохранённый якорь — сдвигаем mesh так, чтобы ПРОТИВОПОЛОЖНЫЙ угол остался на месте
+      if (anchorWorld) {
+        const newAnchorPos = newCorners[anchorIndex];
+        const delta = anchorWorld.clone().sub(newAnchorPos);
+        this.selectedMesh.position.add(delta);
+      }
 
       // Обновляем ручки
       this.clearResizeHandles();
       this.createResizeHandles(this.selectedMesh);
 
       this.render();
+
+      // Сохраняем новую позицию мыши и размера для плавного масштабирования
+      this.resizeStartMouse.set(event.x, event.y);
+      this.resizeStartSize.set(newWidth, newHeight);
+
       return of(null);
     }
 

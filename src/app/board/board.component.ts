@@ -615,8 +615,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       // Текущее смещение курсора относительно старта
       const dx = event.clientX - this.resizeStartMouse.x;
       const dy = event.clientY - this.resizeStartMouse.y;
-      const wrapper = this.canvasWrapper.nativeElement;
-      const rect = wrapper.getBoundingClientRect();
 
       // В зависимости от угла выбираем знак масштабирования
       const cornerIndex = this.resizingCorner.userData['cornerIndex'];
@@ -628,31 +626,33 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       // Новый scale = стартовый размер ± дельта
       const geo = <THREE.PlaneGeometry>this.selectedMesh.geometry;
 
-      // Новые размеры
-      const newWidth = this.resizeStartSize.x + dx * sx;
-      const newHeight = this.resizeStartSize.y + dy * sy;
+      // Сохраняем пропорции
+      const aspect = this.resizeStartSize.x / this.resizeStartSize.y;
+
+      // Делаем масштабирование по X с сохранением пропорций
+      let newWidth = this.resizeStartSize.x + dx * sx;
+      newWidth = Math.max(newWidth, 1e-3); // защита от переворота
+      const newHeight = newWidth / aspect;
 
       this.selectedMesh.scale.x = newWidth / geo.parameters.width;
       this.selectedMesh.scale.y = newHeight / geo.parameters.height;
 
-      // Фиксируем якорь (противолежащий угол)
-      const activeIndex = data?.activeIndex ?? cornerIndex;
-      const anchorIndex = data?.anchorIndex ?? ((activeIndex + 2) % 4);
+      // Фиксируем якорь
+      const anchorIndex = data?.anchorIndex ?? ((cornerIndex + 2) % 4);
       const anchorWorld = data?.anchorWorld;
-      // Пересчитываем bbox после масштаба
-      const newBbox = new THREE.Box3().setFromObject(this.selectedMesh);
 
       // Порядок углов тот же, что и при создании ручек:
       // 0 — нижний правый (BR), 1 — нижний левый (BL), 2 — верхний левый (TL), 3 — верхний правый (TR)
-      const newCorners = [
-        new THREE.Vector3(newBbox.max.x, newBbox.min.y, 0), // BR
-        new THREE.Vector3(newBbox.min.x, newBbox.min.y, 0), // BL
-        new THREE.Vector3(newBbox.min.x, newBbox.max.y, 0), // TL
-        new THREE.Vector3(newBbox.max.x, newBbox.max.y, 0)  // TR
-      ];
-
-      // Если есть сохранённый якорь — сдвигаем mesh так, чтобы якорь остался на месте
       if (anchorWorld) {
+        const newBbox = new THREE.Box3().setFromObject(this.selectedMesh);
+        const newCorners = [
+          new THREE.Vector3(newBbox.max.x, newBbox.min.y, 0),
+          new THREE.Vector3(newBbox.min.x, newBbox.min.y, 0),
+          new THREE.Vector3(newBbox.min.x, newBbox.max.y, 0),
+          new THREE.Vector3(newBbox.max.x, newBbox.max.y, 0),
+        ];
+
+        // Если есть сохранённый якорь — сдвигаем mesh так, чтобы якорь остался на месте
         const newAnchorPos = newCorners[anchorIndex];
         const delta = anchorWorld.clone().sub(newAnchorPos);
         this.selectedMesh.position.add(delta);
@@ -668,12 +668,15 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
   public onFilesSelected(event: Event): void {
     const input = <HTMLInputElement>event.target;
+
     if (!input.files?.length) return;
 
     Array.from(input.files).forEach((file) => {
       const reader = new FileReader();
+
       reader.onload = (e) => {
         const loader = new THREE.TextureLoader();
+
         loader.load(<string>e.target!.result, (texture) => {
           // Современные настройки текстуры
           texture.colorSpace = 'srgb'; // Используем строковое значение
@@ -713,6 +716,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
           console.error('Ошибка загрузки изображения', error);
         });
       };
+
       reader.readAsDataURL(file);
     });
   }

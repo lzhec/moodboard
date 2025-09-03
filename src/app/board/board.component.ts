@@ -658,7 +658,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         this.selectedMesh.position.add(delta);
       }
 
-      // Обновляем ручки
       this.clearResizeHandles();
       this.createResizeHandles(this.selectedMesh);
       this.render();

@@ -58,6 +58,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private rotateStartAngle = 0;
   private rotateStartRotation = 0;
   private rotateLines: THREE.LineLoop[] = [];
+  private rotateStartRotationZ = 0;
 
   private resizeTimeout: ReturnType<typeof setTimeout>;
   private isPanning = false;
@@ -408,15 +409,17 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       if (rotateIntersects.length > 0) {
         this.isRotating = true;
 
-        // центр меша в экранных координатах
-        const center = this.getMeshScreenCenter(this.selectedMesh);
-        const startAngle = Math.atan2(
-          event.clientY - center.y,
-          event.clientX - center.x
-        );
+        const rectDOM = this.renderer.domElement.getBoundingClientRect();
+        const mouseX = event.clientX - rectDOM.left;
+        const mouseY = event.clientY - rectDOM.top;
 
-        this.rotateStartAngle = startAngle;
-        this.rotateStartRotation = this.selectedMesh.rotation.z;
+        const center = this.getBoundingRectCenter(this.selectedMesh);
+        const centerScreen = center.clone().project(this.camera);
+        const cx = (centerScreen.x * 0.5 + 0.5) * rectDOM.width;
+        const cy = (-centerScreen.y * 0.5 + 0.5) * rectDOM.height;
+
+        this.rotateStartAngle = Math.atan2(mouseY - cy, mouseX - cx);
+        this.rotateStartRotationZ = this.selectedMesh.rotation.z;
 
         event.preventDefault();
         return of(null);
@@ -634,38 +637,26 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   }
 
   private rotateToolHandler(event: PointerEvent): void {
-    const center = this.getMeshScreenCenter(this.selectedMesh);
+    const rectDOM = this.renderer.domElement.getBoundingClientRect();
+    const mouseX = event.clientX - rectDOM.left;
+    const mouseY = event.clientY - rectDOM.top;
 
-    // текущий угол курсора относительно центра меша
-    const currentAngle = Math.atan2(
-      event.clientY - center.y,
-      event.clientX - center.x
-    );
+    const center = this.getBoundingRectCenter(this.selectedMesh);
+    const centerScreen = center.clone().project(this.camera);
+    const cx = (centerScreen.x * 0.5 + 0.5) * rectDOM.width;
+    const cy = (-centerScreen.y * 0.5 + 0.5) * rectDOM.height;
 
-    // разница
+    const currentAngle = Math.atan2(mouseY - cy, mouseX - cx);
     let angleDelta = currentAngle - this.rotateStartAngle;
 
-    // нормализация
     if (angleDelta > Math.PI) angleDelta -= 2 * Math.PI;
     if (angleDelta < -Math.PI) angleDelta += 2 * Math.PI;
 
-    // применяем вращение относительно сохранённого начального
-    this.selectedMesh.rotation.z = this.rotateStartRotation + angleDelta;
+    this.selectedMesh.rotation.z = this.rotateStartRotationZ + angleDelta;
 
-    // обновляем ручку — но без пересоздания
-    if (this.rotateHandle) {
-      const bbox = new THREE.Box3().setFromObject(this.selectedMesh);
-      const size = bbox.getSize(new THREE.Vector3());
-
-      this.rotateHandle.position.set(
-        0,               // центр X
-        size.y / 2 + 30, // над верхним краем
-        0
-      );
-    }
-
-    // this.updateRotateBorder(this.selectedMesh);
+    // Обновляем рамку и ручку
     this.updateRotateHandle(this.selectedMesh);
+
     this.render();
   }
 
@@ -920,84 +911,77 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     // Удаляем существующие бордеры и ручку
     this.clearRotateHandles(mesh);
 
-    // --- Рамка ---
-    const geo = mesh.geometry as THREE.BufferGeometry;
-    geo.computeBoundingBox();
-    const bbox = geo.boundingBox!.clone();
-    bbox.applyMatrix4(mesh.matrixWorld);
+    // Получаем bounding rect по вершинам (учитываем дисторт)
+    const rect = this.getBoundingRectFromGeometry(mesh);
 
+    // Прямоугольная рамка
     const corners = [
-      new THREE.Vector3(bbox.max.x, bbox.min.y, 0),
-      new THREE.Vector3(bbox.min.x, bbox.min.y, 0),
-      new THREE.Vector3(bbox.min.x, bbox.max.y, 0),
-      new THREE.Vector3(bbox.max.x, bbox.max.y, 0),
+      new THREE.Vector3(rect.maxX, rect.minY, rect.z), // BR
+      new THREE.Vector3(rect.minX, rect.minY, rect.z), // BL
+      new THREE.Vector3(rect.minX, rect.maxY, rect.z), // TL
+      new THREE.Vector3(rect.maxX, rect.maxY, rect.z), // TR
     ];
-
-    const borderGeometry = new THREE.BufferGeometry().setFromPoints([
-      corners[0], corners[1], corners[2], corners[3], corners[0]
-    ]);
 
     const borderMaterial = new THREE.LineBasicMaterial({
       color: 0xff0000,
       linewidth: 2
     });
 
+    const borderGeometry = new THREE.BufferGeometry().setFromPoints([
+      corners[0], corners[1], corners[2], corners[3], corners[0]
+    ]);
+
     const borderLine = new THREE.LineLoop(borderGeometry, borderMaterial);
-    borderLine.name = "rotate-border";
+    borderLine.name = 'rotate-border';
     borderLine.renderOrder = 1000;
     this.scene.add(borderLine);
     this.rotateLines.push(borderLine);
 
-    // --- Ручка ---
-    const handleGeo = new THREE.CircleGeometry(30, 32);
-    const handleMat = new THREE.MeshBasicMaterial({
+    // Ручка по центру верхней грани
+    const handleGeometry = new THREE.CircleGeometry(15, 32);
+    const handleMaterial = new THREE.MeshBasicMaterial({
       color: 0xff0000,
       transparent: true,
       opacity: 0.5,
       depthTest: false
     });
-    this.rotateHandle = new THREE.Mesh(handleGeo, handleMat);
-    this.rotateHandle.name = "rotate-handle";
+
+    this.rotateHandle = new THREE.Mesh(handleGeometry, handleMaterial);
+    this.rotateHandle.name = 'rotate-handle';
     this.rotateHandle.renderOrder = 1000;
 
-    this.scene.add(this.rotateHandle);
+    const centerTop = new THREE.Vector3((rect.minX + rect.maxX) / 2, rect.maxY + 30, rect.z);
+    this.rotateHandle.position.copy(centerTop);
 
-    this.updateRotateHandle(mesh); // сразу выставим позиции
+    this.scene.add(this.rotateHandle);
+    this.render();
   }
 
   private updateRotateHandle(mesh: THREE.Mesh): void {
     if (!mesh) return;
 
-    const geo = mesh.geometry as THREE.BufferGeometry;
-    geo.computeBoundingBox();
-    const bbox = geo.boundingBox!.clone();
-    bbox.applyMatrix4(mesh.matrixWorld);
+    const rect = this.getBoundingRectFromGeometry(mesh);
 
-    // --- обновляем рамку ---
+    // рамка
+    const rectCorners = [
+      new THREE.Vector3(rect.maxX, rect.minY, rect.z),
+      new THREE.Vector3(rect.minX, rect.minY, rect.z),
+      new THREE.Vector3(rect.minX, rect.maxY, rect.z),
+      new THREE.Vector3(rect.maxX, rect.maxY, rect.z)
+    ];
+
     if (this.rotateLines.length > 0) {
-      const corners = [
-        new THREE.Vector3(bbox.max.x, bbox.min.y, 0),
-        new THREE.Vector3(bbox.min.x, bbox.min.y, 0),
-        new THREE.Vector3(bbox.min.x, bbox.max.y, 0),
-        new THREE.Vector3(bbox.max.x, bbox.max.y, 0),
-      ];
-
       const borderGeometry = new THREE.BufferGeometry().setFromPoints([
-        corners[0], corners[1], corners[2], corners[3], corners[0]
+        rectCorners[0], rectCorners[1], rectCorners[2], rectCorners[3], rectCorners[0]
       ]);
       (this.rotateLines[0] as THREE.LineLoop).geometry.dispose();
       (this.rotateLines[0] as THREE.LineLoop).geometry = borderGeometry;
     }
 
-    // --- обновляем ручку ---
+    // ручка
     if (this.rotateHandle) {
-      const center = new THREE.Vector3();
-      bbox.getCenter(center);
-      const size = new THREE.Vector3();
-      bbox.getSize(size);
-
-      this.rotateHandle.position.copy(center);
-      this.rotateHandle.position.y += size.y / 2 + 30; // чуть выше bbox
+      const centerTop = new THREE.Vector3((rect.minX + rect.maxX) / 2, rect.maxY + 30, rect.z);
+      this.rotateHandle.position.copy(centerTop);
     }
   }
 
@@ -1096,6 +1080,39 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.rotateHandle?.geometry.dispose();
     (<THREE.Material>this.rotateHandle?.material)?.dispose();
     this.render();
+  }
+
+  private getBoundingRectFromGeometry(mesh: THREE.Mesh): { minX: number, maxX: number, minY: number, maxY: number, z: number } {
+    const geo = mesh.geometry as THREE.BufferGeometry;
+    const posAttr = geo.attributes['position'] as THREE.BufferAttribute;
+
+    const vertex = new THREE.Vector3();
+    let minX = Infinity, minY = Infinity;
+    let maxX = -Infinity, maxY = -Infinity;
+    let z = 0;
+
+    for (let i = 0; i < posAttr.count; i++) {
+      vertex.fromBufferAttribute(posAttr, i);
+      mesh.localToWorld(vertex); // перевод в мировые координаты
+
+      if (vertex.x < minX) minX = vertex.x;
+      if (vertex.x > maxX) maxX = vertex.x;
+      if (vertex.y < minY) minY = vertex.y;
+      if (vertex.y > maxY) maxY = vertex.y;
+
+      z = vertex.z; // всё в одной плоскости
+    }
+
+    return { minX, maxX, minY, maxY, z };
+  }
+
+  private getBoundingRectCenter(mesh: THREE.Mesh): THREE.Vector3 {
+    const rect = this.getBoundingRectFromGeometry(mesh);
+    return new THREE.Vector3(
+      (rect.minX + rect.maxX) / 2,
+      (rect.minY + rect.maxY) / 2,
+      rect.z
+    );
   }
 
   private calculatePositionAdjustment(

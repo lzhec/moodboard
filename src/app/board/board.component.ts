@@ -12,9 +12,10 @@ type Tool = 'move' | 'scale' | 'rotate' | 'distort';
 
 interface CustomPointerEvent {
   tool: Tool;
-  activeIndex: number;
-  anchorIndex: number;
-  anchorWorld: THREE.Vector3;
+  activeIndex?: number;
+  anchorIndex?: number;
+  anchorWorld?: THREE.Vector3;
+  center?: THREE.Vector3;
 }
 
 @Component({
@@ -422,7 +423,8 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         this.rotateStartRotationZ = this.selectedMesh.rotation.z;
 
         event.preventDefault();
-        return of(null);
+
+        return of({ tool: 'rotate', center: center });
       }
     }
 
@@ -467,7 +469,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     // Проверяем, что мы в режиме поворота и идет процесс вращения
     if (this.tool === 'rotate' && this.isRotating && this.selectedMesh) {
-      this.rotateToolHandler(event);
+      this.rotateToolHandler(event, data);
     }
 
     // Логика дисторта
@@ -636,13 +638,12 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     return of(null);
   }
 
-  private rotateToolHandler(event: PointerEvent): void {
+  private rotateToolHandler(event: PointerEvent, data: CustomPointerEvent): void {
     const rectDOM = this.renderer.domElement.getBoundingClientRect();
     const mouseX = event.clientX - rectDOM.left;
     const mouseY = event.clientY - rectDOM.top;
 
-    const center = this.getBoundingRectCenter(this.selectedMesh);
-    const centerScreen = center.clone().project(this.camera);
+    const centerScreen = data.center.clone().project(this.camera);
     const cx = (centerScreen.x * 0.5 + 0.5) * rectDOM.width;
     const cy = (-centerScreen.y * 0.5 + 0.5) * rectDOM.height;
 
@@ -884,9 +885,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       linewidth: 2
     });
 
-    const borderGeometry = new THREE.BufferGeometry().setFromPoints([
-      corners[0], corners[1], corners[2], corners[3], corners[0]
-    ]);
+    const borderGeometry = new THREE.BufferGeometry().setFromPoints([...corners, corners[0]]);
 
     const borderLine = new THREE.LineLoop(borderGeometry, borderMaterial);
     borderLine.name = 'rotate-border';
@@ -973,7 +972,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     if (this.rotateLines.length > 0) {
       const borderGeometry = new THREE.BufferGeometry().setFromPoints([
-        rectCorners[0], rectCorners[1], rectCorners[2], rectCorners[3], rectCorners[0]
+        ...rectCorners, rectCorners[0]
       ]);
       (this.rotateLines[0] as THREE.LineLoop).geometry.dispose();
       (this.rotateLines[0] as THREE.LineLoop).geometry = borderGeometry;

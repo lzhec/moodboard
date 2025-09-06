@@ -660,49 +660,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  private getMeshScreenCenter(mesh: THREE.Mesh): { x: number, y: number } {
-    const center = new THREE.Vector3();
-    new THREE.Box3().setFromObject(mesh).getCenter(center);
-
-    // переводим в NDC
-    center.project(this.camera);
-
-    // конвертируем в экранные координаты
-    const rect = this.renderer.domElement.getBoundingClientRect();
-    return {
-      x: (center.x + 1) / 2 * rect.width + rect.left,
-      y: (-center.y + 1) / 2 * rect.height + rect.top
-    };
-  }
-
-  private updateRotateBorder(mesh: THREE.Mesh): void {
-    if (!this.rotateLines || this.rotateLines.length === 0) return;
-
-    const bbox = new THREE.Box3().setFromObject(mesh);
-
-    const corners = [
-      new THREE.Vector3(bbox.max.x, bbox.min.y, 0), // BR
-      new THREE.Vector3(bbox.min.x, bbox.min.y, 0), // BL
-      new THREE.Vector3(bbox.min.x, bbox.max.y, 0), // TL
-      new THREE.Vector3(bbox.max.x, bbox.max.y, 0), // TR
-      new THREE.Vector3(bbox.max.x, bbox.min.y, 0)  // замыкание
-    ];
-
-    const positions = new Float32Array(corners.length * 3);
-    corners.forEach((c, i) => {
-      positions[i * 3] = c.x;
-      positions[i * 3 + 1] = c.y;
-      positions[i * 3 + 2] = c.z;
-    });
-
-    const border = this.rotateLines[0]; // твой borderLine
-    (border.geometry as THREE.BufferGeometry).setAttribute(
-      'position',
-      new THREE.BufferAttribute(positions, 3)
-    );
-    (border.geometry as THREE.BufferGeometry).computeBoundingSphere();
-  }
-
   public onFilesSelected(event: Event): void {
     const input = <HTMLInputElement>event.target;
 
@@ -957,34 +914,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  private updateRotateHandle(mesh: THREE.Mesh): void {
-    if (!mesh) return;
-
-    const rect = this.getBoundingRectFromGeometry(mesh);
-
-    // рамка
-    const rectCorners = [
-      new THREE.Vector3(rect.maxX, rect.minY, rect.z),
-      new THREE.Vector3(rect.minX, rect.minY, rect.z),
-      new THREE.Vector3(rect.minX, rect.maxY, rect.z),
-      new THREE.Vector3(rect.maxX, rect.maxY, rect.z)
-    ];
-
-    if (this.rotateLines.length > 0) {
-      const borderGeometry = new THREE.BufferGeometry().setFromPoints([
-        rectCorners[0], rectCorners[1], rectCorners[2], rectCorners[3], rectCorners[0]
-      ]);
-      (this.rotateLines[0] as THREE.LineLoop).geometry.dispose();
-      (this.rotateLines[0] as THREE.LineLoop).geometry = borderGeometry;
-    }
-
-    // ручка
-    if (this.rotateHandle) {
-      const centerTop = new THREE.Vector3((rect.minX + rect.maxX) / 2, rect.maxY + 30, rect.z);
-      this.rotateHandle.position.copy(centerTop);
-    }
-  }
-
   private createDistortHandles(mesh: THREE.Mesh): void {
     this.clearDistortHandles();
 
@@ -1029,162 +958,32 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     this.render();
   }
 
-  private clearDistortHandles(): void {
-    this.cornerSpheres.forEach(s => {
-      this.scene.remove(s);
-      s.geometry.dispose();
-      (<THREE.Material>s.material).dispose();
-    });
-    this.cornerSpheres = [];
-    this.render();
-  }
+  private updateRotateHandle(mesh: THREE.Mesh): void {
+    if (!mesh) return;
 
-  private clearResizeHandles(): void {
-    // Удаление бордеров
-    this.borderLines.forEach(line => {
-      this.scene.remove(line);
-      line.geometry.dispose();
-      (<THREE.Material>line.material).dispose();
-    });
-    this.borderLines = [];
-
-    // Удаление сфер
-    this.resizeSpheres.forEach(s => {
-      this.scene.remove(s);
-      s.geometry.dispose();
-      (<THREE.Material>s.material).dispose();
-    });
-    this.resizeSpheres = [];
-    this.render();
-  }
-
-  private clearRotateHandles(mesh: THREE.Mesh = null): void {
-    this.rotateLines.forEach(line => {
-      this.scene.remove(line);
-      line.geometry.dispose();
-      (<THREE.Material>line.material).dispose();
-    });
-
-    this.rotateLines = [];
-
-    if (this.rotateHandle) {
-      if (this.selectedMesh) {
-        this.selectedMesh.remove(this.rotateHandle);
-      }
-
-      this.scene.remove(this.rotateHandle);
-      this.rotateHandle = null;
-    }
-
-    this.scene.remove(<THREE.Mesh>this.rotateHandle);
-    this.rotateHandle?.geometry.dispose();
-    (<THREE.Material>this.rotateHandle?.material)?.dispose();
-    this.render();
-  }
-
-  private getBoundingRectFromGeometry(mesh: THREE.Mesh): { minX: number, maxX: number, minY: number, maxY: number, z: number } {
-    const geo = mesh.geometry as THREE.BufferGeometry;
-    const posAttr = geo.attributes['position'] as THREE.BufferAttribute;
-
-    const vertex = new THREE.Vector3();
-    let minX = Infinity, minY = Infinity;
-    let maxX = -Infinity, maxY = -Infinity;
-    let z = 0;
-
-    for (let i = 0; i < posAttr.count; i++) {
-      vertex.fromBufferAttribute(posAttr, i);
-      mesh.localToWorld(vertex); // перевод в мировые координаты
-
-      if (vertex.x < minX) minX = vertex.x;
-      if (vertex.x > maxX) maxX = vertex.x;
-      if (vertex.y < minY) minY = vertex.y;
-      if (vertex.y > maxY) maxY = vertex.y;
-
-      z = vertex.z; // всё в одной плоскости
-    }
-
-    return { minX, maxX, minY, maxY, z };
-  }
-
-  private getBoundingRectCenter(mesh: THREE.Mesh): THREE.Vector3 {
     const rect = this.getBoundingRectFromGeometry(mesh);
-    return new THREE.Vector3(
-      (rect.minX + rect.maxX) / 2,
-      (rect.minY + rect.maxY) / 2,
-      rect.z
-    );
-  }
 
-  private calculatePositionAdjustment(
-    cornerIndex: number,
-    startPos: THREE.Vector3,
-    startSize: THREE.Vector2,
-    newSize: THREE.Vector2
-  ): THREE.Vector3 {
-    const dx = (newSize.x - startSize.x) / 2;
-    const dy = (newSize.y - startSize.y) / 2;
+    // рамка
+    const rectCorners = [
+      new THREE.Vector3(rect.maxX, rect.minY, rect.z),
+      new THREE.Vector3(rect.minX, rect.minY, rect.z),
+      new THREE.Vector3(rect.minX, rect.maxY, rect.z),
+      new THREE.Vector3(rect.maxX, rect.maxY, rect.z)
+    ];
 
-    switch (cornerIndex) {
-      case 0: // верхний левый
-        return new THREE.Vector3(
-          startPos.x + dx,
-          startPos.y - dy,
-          startPos.z
-        );
-      case 1: // верхний правый
-        return new THREE.Vector3(
-          startPos.x - dx,
-          startPos.y - dy,
-          startPos.z
-        );
-      case 2: // нижний правый
-        return new THREE.Vector3(
-          startPos.x - dx,
-          startPos.y + dy,
-          startPos.z
-        );
-      case 3: // нижний левый
-        return new THREE.Vector3(
-          startPos.x + dx,
-          startPos.y + dy,
-          startPos.z
-        );
-      default:
-        return startPos;
+    if (this.rotateLines.length > 0) {
+      const borderGeometry = new THREE.BufferGeometry().setFromPoints([
+        rectCorners[0], rectCorners[1], rectCorners[2], rectCorners[3], rectCorners[0]
+      ]);
+      (this.rotateLines[0] as THREE.LineLoop).geometry.dispose();
+      (this.rotateLines[0] as THREE.LineLoop).geometry = borderGeometry;
     }
-  }
 
-  private calculateRotationAngle(event: MouseEvent): number {
-    if (!this.selectedMesh || !this.rotateHandle) return 0;
-
-    const rect = this.renderer.domElement.getBoundingClientRect();
-    const mouseX = event.clientX - rect.left;
-    const mouseY = event.clientY - rect.top;
-
-    // Получаем позицию ротейт-ручки
-    const handleWorldPos = new THREE.Vector3();
-    this.rotateHandle.getWorldPosition(handleWorldPos);
-
-    // Создаем вектор мыши в нормализованных координатах
-    const mouse = new THREE.Vector2(
-      (mouseX / rect.width) * 2 - 1,
-      -(mouseY / rect.height) * 2 + 1
-    );
-
-    // Настраиваем raycaster с текущей камерой
-    this.raycaster.setFromCamera(mouse, this.camera);
-
-    // Получаем позицию мыши в мировых координатах
-    const worldPoint = new THREE.Vector3();
-    this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1)), worldPoint);
-
-    // Вычисляем угол относительно центра ротейт-ручки
-    const angle = Math.atan2(
-      worldPoint.y - handleWorldPos.y,
-      worldPoint.x - handleWorldPos.x
-    );
-
-    return angle;
+    // ручка
+    if (this.rotateHandle) {
+      const centerTop = new THREE.Vector3((rect.minX + rect.maxX) / 2, rect.maxY + 30, rect.z);
+      this.rotateHandle.position.copy(centerTop);
+    }
   }
 
   private updateDistort(): void {
@@ -1243,6 +1042,125 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     posAttr.needsUpdate = true;
     geo.computeVertexNormals();
+  }
+
+  private clearResizeHandles(): void {
+    // Удаление бордеров
+    this.borderLines.forEach(line => {
+      this.scene.remove(line);
+      line.geometry.dispose();
+      (<THREE.Material>line.material).dispose();
+    });
+    this.borderLines = [];
+
+    // Удаление сфер
+    this.resizeSpheres.forEach(s => {
+      this.scene.remove(s);
+      s.geometry.dispose();
+      (<THREE.Material>s.material).dispose();
+    });
+    this.resizeSpheres = [];
+    this.render();
+  }
+
+  private clearRotateHandles(mesh: THREE.Mesh = null): void {
+    this.rotateLines.forEach(line => {
+      this.scene.remove(line);
+      line.geometry.dispose();
+      (<THREE.Material>line.material).dispose();
+    });
+
+    this.rotateLines = [];
+
+    if (this.rotateHandle) {
+      if (this.selectedMesh) {
+        this.selectedMesh.remove(this.rotateHandle);
+      }
+
+      this.scene.remove(this.rotateHandle);
+      this.rotateHandle = null;
+    }
+
+    this.scene.remove(<THREE.Mesh>this.rotateHandle);
+    this.rotateHandle?.geometry.dispose();
+    (<THREE.Material>this.rotateHandle?.material)?.dispose();
+    this.render();
+  }
+
+  private clearDistortHandles(): void {
+    this.cornerSpheres.forEach(s => {
+      this.scene.remove(s);
+      s.geometry.dispose();
+      (<THREE.Material>s.material).dispose();
+    });
+    this.cornerSpheres = [];
+    this.render();
+  }
+
+  private getBoundingRectFromGeometry(mesh: THREE.Mesh): { minX: number, maxX: number, minY: number, maxY: number, z: number } {
+    const geo = mesh.geometry as THREE.BufferGeometry;
+    const posAttr = geo.attributes['position'] as THREE.BufferAttribute;
+
+    const vertex = new THREE.Vector3();
+    let minX = Infinity, minY = Infinity;
+    let maxX = -Infinity, maxY = -Infinity;
+    let z = 0;
+
+    for (let i = 0; i < posAttr.count; i++) {
+      vertex.fromBufferAttribute(posAttr, i);
+      mesh.localToWorld(vertex); // перевод в мировые координаты
+
+      if (vertex.x < minX) minX = vertex.x;
+      if (vertex.x > maxX) maxX = vertex.x;
+      if (vertex.y < minY) minY = vertex.y;
+      if (vertex.y > maxY) maxY = vertex.y;
+
+      z = vertex.z; // всё в одной плоскости
+    }
+
+    return { minX, maxX, minY, maxY, z };
+  }
+
+  private getBoundingRectCenter(mesh: THREE.Mesh): THREE.Vector3 {
+    const rect = this.getBoundingRectFromGeometry(mesh);
+    return new THREE.Vector3(
+      (rect.minX + rect.maxX) / 2,
+      (rect.minY + rect.maxY) / 2,
+      rect.z
+    );
+  }
+
+  private calculateRotationAngle(event: MouseEvent): number {
+    if (!this.selectedMesh || !this.rotateHandle) return 0;
+
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+
+    // Получаем позицию ротейт-ручки
+    const handleWorldPos = new THREE.Vector3();
+    this.rotateHandle.getWorldPosition(handleWorldPos);
+
+    // Создаем вектор мыши в нормализованных координатах
+    const mouse = new THREE.Vector2(
+      (mouseX / rect.width) * 2 - 1,
+      -(mouseY / rect.height) * 2 + 1
+    );
+
+    // Настраиваем raycaster с текущей камерой
+    this.raycaster.setFromCamera(mouse, this.camera);
+
+    // Получаем позицию мыши в мировых координатах
+    const worldPoint = new THREE.Vector3();
+    this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1)), worldPoint);
+
+    // Вычисляем угол относительно центра ротейт-ручки
+    const angle = Math.atan2(
+      worldPoint.y - handleWorldPos.y,
+      worldPoint.x - handleWorldPos.x
+    );
+
+    return angle;
   }
 
   public setTool(tool: 'move' | 'scale' | 'rotate' | 'distort', checkCurrentTool = true): void {

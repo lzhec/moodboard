@@ -14,7 +14,7 @@ interface CustomPointerEvent {
   tool: Tool;
   activeIndex?: number;
   anchorIndex?: number;
-  anchorWorld?: THREE.Vector3;
+  anchor?: THREE.Vector3;
   center?: THREE.Vector3;
 }
 
@@ -618,13 +618,27 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     // Якорь — противолежащий угол
     const activeIndex = this.resizeSpheres.indexOf(this.resizingCorner);
     const anchorIndex = (activeIndex + 2) % 4;
-    const anchorWorld = this.resizeSpheres[anchorIndex].position.clone(); // уже в мировых координатах
+
+    // Получаем углы рамки по вершинам (getBoundingRectFromGeometry возвращает мировые координаты,
+    // т.к. внутри он делает mesh.localToWorld(vertex))
+    this.selectedMesh.updateMatrixWorld(true);
+
+    const rect = this.getBoundingRectFromGeometry(this.selectedMesh);
+    const cornersWorld = [
+      new THREE.Vector3(rect.maxX, rect.minY, rect.z),
+      new THREE.Vector3(rect.minX, rect.minY, rect.z),
+      new THREE.Vector3(rect.minX, rect.maxY, rect.z),
+      new THREE.Vector3(rect.maxX, rect.maxY, rect.z),
+    ];
+
+    // Переводим якорь в ЛОКАЛЬНЫЕ координаты меша
+    const anchor = cornersWorld[anchorIndex].clone(); // фиксируем в world
 
     return of({
       tool: 'scale',
       activeIndex,
       anchorIndex,
-      anchorWorld,
+      anchor, // Сохраняем локальный якорь
     });
   }
 
@@ -657,23 +671,38 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
       // Фиксируем якорь
       const anchorIndex = data?.anchorIndex ?? ((cornerIndex + 2) % 4);
-      const anchorWorld = data?.anchorWorld;
+      const anchorWorld = data?.anchor;
 
       // Порядок углов тот же, что и при создании ручек:
       // 0 — нижний правый (BR), 1 — нижний левый (BL), 2 — верхний левый (TL), 3 — верхний правый (TR)
-      if (anchorWorld) {
-        const newBbox = new THREE.Box3().setFromObject(this.selectedMesh);
-        const newCorners = [
-          new THREE.Vector3(newBbox.max.x, newBbox.min.y, 0),
-          new THREE.Vector3(newBbox.min.x, newBbox.min.y, 0),
-          new THREE.Vector3(newBbox.min.x, newBbox.max.y, 0),
-          new THREE.Vector3(newBbox.max.x, newBbox.max.y, 0),
+      if (data?.anchor) {
+        // Пересчитываем текущие углы рамки (они возвращаются в мировых координатах)
+        this.selectedMesh.updateMatrixWorld(true);
+
+        // Текущий якорь после скейла в ЛОКАЛЕ
+        const rect = this.getBoundingRectFromGeometry(this.selectedMesh);
+        const newCornersWorld = [
+          new THREE.Vector3(rect.maxX, rect.minY, rect.z),
+          new THREE.Vector3(rect.minX, rect.minY, rect.z),
+          new THREE.Vector3(rect.minX, rect.maxY, rect.z),
+          new THREE.Vector3(rect.maxX, rect.maxY, rect.z),
         ];
 
-        // Если есть сохранённый якорь — сдвигаем mesh так, чтобы якорь остался на месте
-        const newAnchorPos = newCorners[anchorIndex];
-        const delta = anchorWorld.clone().sub(newAnchorPos);
-        this.selectedMesh.position.add(delta);
+        const newAnchorWorld = newCornersWorld[data.anchorIndex].clone();
+
+        // Дельта в мировых координатах: куда сместился угол — исправим её
+        const worldDelta = data.anchor.clone().sub(newAnchorWorld); // anchorWorld - newAnchorWorld
+
+        // Перевести дельту в локальную систему родителя (если есть)
+        if (this.selectedMesh.parent) {
+          const parentInv = new THREE.Matrix4().copy(this.selectedMesh.parent.matrixWorld).invert();
+          const localDelta = worldDelta.clone().applyMatrix4(parentInv);
+
+          this.selectedMesh.position.add(localDelta);
+        } else {
+          // без родителя — просто в world (хотя у тебя всегда есть сцена родитель)
+          this.selectedMesh.position.add(worldDelta);
+        }
       }
 
       // Обновляем ручки
@@ -865,14 +894,13 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     // Очистить предыдущие ручки
     this.clearResizeHandles();
 
-    const bbox = new THREE.Box3().setFromObject(mesh);
+    const rect = this.getBoundingRectFromGeometry(mesh);
 
-    // Создаем массив векторов
-    const corners: { x: number, y: number, z: number }[] = [
-      { x: bbox.max.x, y: bbox.min.y, z: 0 }, // нижний правый
-      { x: bbox.min.x, y: bbox.min.y, z: 0 }, // нижний левый
-      { x: bbox.min.x, y: bbox.max.y, z: 0 }, // верхний левый
-      { x: bbox.max.x, y: bbox.max.y, z: 0 }  // верхний правый
+    const corners = [
+      new THREE.Vector3(rect.maxX, rect.minY, rect.z), // нижний правый
+      new THREE.Vector3(rect.minX, rect.minY, rect.z), // нижний левый
+      new THREE.Vector3(rect.minX, rect.maxY, rect.z), // верхний левый
+      new THREE.Vector3(rect.maxX, rect.maxY, rect.z)  // верхний правый
     ];
 
     // Рисуем бордер прямоугольника
@@ -881,17 +909,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       linewidth: 2,
     });
 
-    const borderGeometry = new THREE.BufferGeometry();
-    const borderPoints = [
-      new THREE.Vector3(corners[0].x, corners[0].y, corners[0].z),
-      new THREE.Vector3(corners[1].x, corners[1].y, corners[1].z),
-      new THREE.Vector3(corners[2].x, corners[2].y, corners[2].z),
-      new THREE.Vector3(corners[3].x, corners[3].y, corners[3].z),
-      new THREE.Vector3(corners[0].x, corners[0].y, corners[0].z) // Замыкаем прямоугольник
-    ];
-
-    borderGeometry.setFromPoints(borderPoints);
-
+    const borderGeometry = new THREE.BufferGeometry().setFromPoints([...corners, corners[0]]);
     const borderLine = new THREE.LineLoop(borderGeometry, borderMaterial);
 
     this.scene.add(borderLine);
@@ -903,7 +921,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
         new THREE.SphereGeometry(8, 8, 8),
         new THREE.MeshBasicMaterial({ color: 0x00aaff })
       );
-      sphere.position.set(corners[i].x, corners[i].y, corners[i].z);
+      sphere.position.copy(corners[i]);
       sphere.userData['cornerIndex'] = i;
 
       this.scene.add(sphere);

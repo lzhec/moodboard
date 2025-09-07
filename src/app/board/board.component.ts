@@ -69,6 +69,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   private isDraggingImage = false;
   private dragStartMouse = new THREE.Vector2();
   private dragStartPos = new THREE.Vector3();
+  private pivot: THREE.Object3D;
 
   public ngAfterViewInit(): void {
     this.initThree();
@@ -407,23 +408,34 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     // 3. Проверяем, попадает ли клик в ротейт-ручку
     if (this.tool === 'rotate' && this.selectedMesh && this.rotateHandle) {
       const rotateIntersects = this.raycaster.intersectObject(this.rotateHandle);
+
       if (rotateIntersects.length > 0) {
         this.isRotating = true;
+
+        // Создаём pivot и помещаем в него mesh
+        const center = this.getBoundingRectCenter(this.selectedMesh);
+        this.pivot = new THREE.Object3D();
+        this.scene.add(this.pivot);
+        this.pivot.position.copy(center);
+
+        // Сохраняем мировой центр mesh до перемещения
+        const worldPos = this.selectedMesh.getWorldPosition(new THREE.Vector3());
+        this.pivot.add(this.selectedMesh);
+        // После добавления в pivot позиция mesh должна быть локальной
+        this.selectedMesh.position.copy(this.selectedMesh.position.clone().sub(center));
 
         const rectDOM = this.renderer.domElement.getBoundingClientRect();
         const mouseX = event.clientX - rectDOM.left;
         const mouseY = event.clientY - rectDOM.top;
 
-        const center = this.getBoundingRectCenter(this.selectedMesh);
         const centerScreen = center.clone().project(this.camera);
         const cx = (centerScreen.x * 0.5 + 0.5) * rectDOM.width;
         const cy = (-centerScreen.y * 0.5 + 0.5) * rectDOM.height;
 
         this.rotateStartAngle = Math.atan2(mouseY - cy, mouseX - cx);
-        this.rotateStartRotationZ = this.selectedMesh.rotation.z;
+        this.rotateStartRotationZ = this.pivot.rotation.z;
 
         event.preventDefault();
-
         return of({ tool: 'rotate', center: center });
       }
     }
@@ -534,10 +546,14 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
   private onPointerUp(event: PointerEvent): Observable<void> {
     if (event.button === 0) {
+      if (this.isRotating) {
+        this.exitRotateMode();
+      }
+
       this.isDraggingImage = false;
       this.isRotating = false;
       this.draggingCorner = null;
-      this.resizingCorner = null;  // Сбрасываем ресайз
+      this.resizingCorner = null;
     }
 
     return of(null);
@@ -547,6 +563,38 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  }
+
+  private exitRotateMode(): void {
+    if (this.pivot && this.selectedMesh) {
+      // Обновляем мировую матрицу
+      this.pivot.updateMatrixWorld(true);
+
+      // Применяем поворот pivot к мешу
+      this.selectedMesh.applyMatrix4(this.pivot.matrix);
+
+      // Сбрасываем pivot
+      this.pivot.rotation.set(0, 0, 0);
+      this.pivot.position.set(0, 0, 0);
+      this.pivot.scale.set(1, 1, 1);
+
+      // Возвращаем меш обратно в сцену
+      this.scene.add(this.selectedMesh);
+
+      // Убираем pivot
+      this.scene.remove(this.pivot);
+      this.pivot = null;
+    }
+
+    this.isRotating = false;
+    this.rotateStartAngle = 0;
+    this.rotateStartRotationZ = 0;
+
+    if (this.selectedMesh) {
+      this.updateRotateHandle(this.selectedMesh);
+    }
+
+    this.render();
   }
 
   private getScaleData(event: PointerEvent): Observable<CustomPointerEvent> {
@@ -653,7 +701,7 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     if (angleDelta > Math.PI) angleDelta -= 2 * Math.PI;
     if (angleDelta < -Math.PI) angleDelta += 2 * Math.PI;
 
-    this.selectedMesh.rotation.z = this.rotateStartRotationZ + angleDelta;
+    this.pivot.rotation.z = this.rotateStartRotationZ + angleDelta;
 
     // Обновляем рамку и ручку
     this.updateRotateHandle(this.selectedMesh);
@@ -1165,6 +1213,10 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
   public setTool(tool: 'move' | 'scale' | 'rotate' | 'distort', checkCurrentTool = true): void {
     if (checkCurrentTool && this.tool === tool) {
       return;
+    }
+
+    if (this.tool === 'rotate' && tool !== 'rotate') {
+      this.exitRotateMode();
     }
 
     this.tool = tool;

@@ -12,7 +12,6 @@ type Tool = 'move' | 'scale' | 'rotate' | 'distort';
 
 interface CustomPointerEvent {
   tool: Tool;
-  activeIndex?: number;
   anchorIndex?: number;
   anchor?: THREE.Vector3;
   center?: THREE.Vector3;
@@ -636,7 +635,6 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     return of({
       tool: 'scale',
-      activeIndex,
       anchorIndex,
       anchor, // Сохраняем локальный якорь
     });
@@ -644,6 +642,57 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
   private scaleToolHandler(event: PointerEvent, data: CustomPointerEvent): Observable<any> {
     if (this.tool === 'scale' && this.resizingCorner && this.selectedMesh) {
+      // // 1. Обновляем mouse и устанавливаем raycaster
+      // this.updateMouse(event);
+      // this.raycaster.setFromCamera(this.mouse, this.camera);
+
+      // this.selectedMesh.updateMatrixWorld(true);
+
+      // // 2. Плоскость, сопланарная мешу
+      // const normal = new THREE.Vector3(0, 0, 1)
+      //   .applyQuaternion(this.selectedMesh.getWorldQuaternion(new THREE.Quaternion()))
+      //   .normalize();
+      // const planePoint = this.selectedMesh.getWorldPosition(new THREE.Vector3());
+      // const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, planePoint);
+
+      // // 3. Пересечение луча с плоскостью
+      // const intersectPoint = new THREE.Vector3();
+
+      // if (!this.raycaster.ray.intersectPlane(plane, intersectPoint)) {
+      //   return of(null);
+      // }
+
+      // // 4. Определяем якорь (противоположный угол)
+      // const anchorIndex = data?.anchorIndex ?? ((this.resizingCorner.userData['cornerIndex'] + 2) % 4);
+      // const anchorWorld = data?.anchor?.clone() ?? this.resizeSpheres[anchorIndex].position.clone();
+
+      // // 5. Вычисляем вектор от якоря к курсору в мировых координатах
+      // const scaleVectorWorld = intersectPoint.clone().sub(anchorWorld);
+
+      // const geo = this.selectedMesh.geometry as THREE.PlaneGeometry;
+      // const aspect = geo.parameters.width / geo.parameters.height;
+
+      // // 6. Новый размер по X с сохранением пропорций
+      // let newWidth = Math.abs(scaleVectorWorld.x);
+      // newWidth = Math.max(newWidth, 1e-3);
+      // const newHeight = newWidth / aspect;
+
+      // // 7. Сохраняем локальный якорь
+      // const anchorLocal = this.selectedMesh.worldToLocal(anchorWorld.clone());
+
+      // // 8. Применяем scale
+      // this.selectedMesh.scale.set(newWidth / geo.parameters.width, newHeight / geo.parameters.height, 1);
+
+      // // 9. После изменения scale сдвигаем меш, чтобы якорь остался на месте
+      // const newAnchorWorld = this.selectedMesh.localToWorld(anchorLocal.clone());
+      // this.selectedMesh.position.add(anchorWorld.clone().sub(newAnchorWorld));
+
+      // // 10. Обновляем ручки и бордер
+      // this.clearResizeHandles();
+      // this.createResizeHandles(this.selectedMesh);
+
+      // this.render();
+
       // Текущее смещение курсора относительно старта
       const dx = event.clientX - this.resizeStartMouse.x;
       const dy = event.clientY - this.resizeStartMouse.y;

@@ -642,119 +642,52 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
   private scaleToolHandler(event: PointerEvent, data: CustomPointerEvent): Observable<any> {
     if (this.tool === 'scale' && this.resizingCorner && this.selectedMesh) {
-      // // 1. Обновляем mouse и устанавливаем raycaster
-      // this.updateMouse(event);
-      // this.raycaster.setFromCamera(this.mouse, this.camera);
+      // 1. Обновляем mouse и устанавливаем raycaster
+      this.updateMouse(event);
+      this.raycaster.setFromCamera(this.mouse, this.camera);
 
-      // this.selectedMesh.updateMatrixWorld(true);
+      this.selectedMesh.updateMatrixWorld(true);
 
-      // // 2. Плоскость, сопланарная мешу
-      // const normal = new THREE.Vector3(0, 0, 1)
-      //   .applyQuaternion(this.selectedMesh.getWorldQuaternion(new THREE.Quaternion()))
-      //   .normalize();
-      // const planePoint = this.selectedMesh.getWorldPosition(new THREE.Vector3());
-      // const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, planePoint);
+      // 2. Плоскость, сопланарная мешу
+      const normal = new THREE.Vector3(0, 0, 1)
+        .applyQuaternion(this.selectedMesh.getWorldQuaternion(new THREE.Quaternion()))
+        .normalize();
+      const planePoint = this.selectedMesh.getWorldPosition(new THREE.Vector3());
+      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, planePoint);
 
-      // // 3. Пересечение луча с плоскостью
-      // const intersectPoint = new THREE.Vector3();
+      // 3. Пересечение луча с плоскостью
+      const intersectPoint = new THREE.Vector3();
 
-      // if (!this.raycaster.ray.intersectPlane(plane, intersectPoint)) {
-      //   return of(null);
-      // }
-
-      // // 4. Определяем якорь (противоположный угол)
-      // const anchorIndex = data?.anchorIndex ?? ((this.resizingCorner.userData['cornerIndex'] + 2) % 4);
-      // const anchorWorld = data?.anchor?.clone() ?? this.resizeSpheres[anchorIndex].position.clone();
-
-      // // 5. Вычисляем вектор от якоря к курсору в мировых координатах
-      // const scaleVectorWorld = intersectPoint.clone().sub(anchorWorld);
-
-      // const geo = this.selectedMesh.geometry as THREE.PlaneGeometry;
-      // const aspect = geo.parameters.width / geo.parameters.height;
-
-      // // 6. Новый размер по X с сохранением пропорций
-      // let newWidth = Math.abs(scaleVectorWorld.x);
-      // newWidth = Math.max(newWidth, 1e-3);
-      // const newHeight = newWidth / aspect;
-
-      // // 7. Сохраняем локальный якорь
-      // const anchorLocal = this.selectedMesh.worldToLocal(anchorWorld.clone());
-
-      // // 8. Применяем scale
-      // this.selectedMesh.scale.set(newWidth / geo.parameters.width, newHeight / geo.parameters.height, 1);
-
-      // // 9. После изменения scale сдвигаем меш, чтобы якорь остался на месте
-      // const newAnchorWorld = this.selectedMesh.localToWorld(anchorLocal.clone());
-      // this.selectedMesh.position.add(anchorWorld.clone().sub(newAnchorWorld));
-
-      // // 10. Обновляем ручки и бордер
-      // this.clearResizeHandles();
-      // this.createResizeHandles(this.selectedMesh);
-
-      // this.render();
-
-      // Текущее смещение курсора относительно старта
-      const dx = event.clientX - this.resizeStartMouse.x;
-      const dy = event.clientY - this.resizeStartMouse.y;
-
-      // В зависимости от угла выбираем знак масштабирования
-      const cornerIndex = this.resizingCorner.userData['cornerIndex'];
-
-      // Переводим движение мыши в изменение размера
-      const sx = (cornerIndex === 1 || cornerIndex === 2) ? -1 : 1;
-      const sy = (cornerIndex === 2 || cornerIndex === 3) ? -1 : 1;
-
-      // Новый scale = стартовый размер ± дельта
-      const geo = <THREE.PlaneGeometry>this.selectedMesh.geometry;
-
-      // Сохраняем пропорции
-      const aspect = this.resizeStartSize.x / this.resizeStartSize.y;
-
-      // Делаем масштабирование по X с сохранением пропорций
-      let newWidth = this.resizeStartSize.x + dx * sx;
-      newWidth = Math.max(newWidth, 1e-3); // защита от переворота
-      const newHeight = newWidth / aspect;
-
-      this.selectedMesh.scale.x = newWidth / geo.parameters.width;
-      this.selectedMesh.scale.y = newHeight / geo.parameters.height;
-
-      // Фиксируем якорь
-      const anchorIndex = data?.anchorIndex ?? ((cornerIndex + 2) % 4);
-      const anchorWorld = data?.anchor;
-
-      // Порядок углов тот же, что и при создании ручек:
-      // 0 — нижний правый (BR), 1 — нижний левый (BL), 2 — верхний левый (TL), 3 — верхний правый (TR)
-      if (data?.anchor) {
-        // Пересчитываем текущие углы рамки (они возвращаются в мировых координатах)
-        this.selectedMesh.updateMatrixWorld(true);
-
-        // Текущий якорь после скейла в ЛОКАЛЕ
-        const rect = this.getBoundingRectFromGeometry(this.selectedMesh);
-        const newCornersWorld = [
-          new THREE.Vector3(rect.maxX, rect.minY, rect.z),
-          new THREE.Vector3(rect.minX, rect.minY, rect.z),
-          new THREE.Vector3(rect.minX, rect.maxY, rect.z),
-          new THREE.Vector3(rect.maxX, rect.maxY, rect.z),
-        ];
-
-        const newAnchorWorld = newCornersWorld[data.anchorIndex].clone();
-
-        // Дельта в мировых координатах: куда сместился угол — исправим её
-        const worldDelta = data.anchor.clone().sub(newAnchorWorld); // anchorWorld - newAnchorWorld
-
-        // Перевести дельту в локальную систему родителя (если есть)
-        if (this.selectedMesh.parent) {
-          const parentInv = new THREE.Matrix4().copy(this.selectedMesh.parent.matrixWorld).invert();
-          const localDelta = worldDelta.clone().applyMatrix4(parentInv);
-
-          this.selectedMesh.position.add(localDelta);
-        } else {
-          // без родителя — просто в world (хотя у тебя всегда есть сцена родитель)
-          this.selectedMesh.position.add(worldDelta);
-        }
+      if (!this.raycaster.ray.intersectPlane(plane, intersectPoint)) {
+        return of(null);
       }
 
-      // Обновляем ручки
+      // 4. Определяем якорь (противоположный угол)
+      const anchorIndex = data?.anchorIndex ?? ((this.resizingCorner.userData['cornerIndex'] + 2) % 4);
+      const anchorWorld = data?.anchor?.clone() ?? this.resizeSpheres[anchorIndex].position.clone();
+
+      // 5. Вычисляем вектор от якоря к курсору в мировых координатах
+      const scaleVectorWorld = intersectPoint.clone().sub(anchorWorld);
+
+      const geo = <THREE.PlaneGeometry>this.selectedMesh.geometry;
+      const aspect = geo.parameters.width / geo.parameters.height;
+
+      // 6. Новый размер по X с сохранением пропорций
+      let newWidth = Math.abs(scaleVectorWorld.x);
+      newWidth = Math.max(newWidth, 1e-3);
+      const newHeight = newWidth / aspect;
+
+      // 7. Сохраняем локальный якорь
+      const anchorLocal = this.selectedMesh.worldToLocal(anchorWorld.clone());
+
+      // 8. Применяем scale
+      this.selectedMesh.scale.set(newWidth / geo.parameters.width, newHeight / geo.parameters.height, 1);
+
+      // 9. После изменения scale сдвигаем меш, чтобы якорь остался на месте
+      const newAnchorWorld = this.selectedMesh.localToWorld(anchorLocal.clone());
+      this.selectedMesh.position.add(anchorWorld.clone().sub(newAnchorWorld));
+
+      // 10. Обновляем ручки и бордер
       this.clearResizeHandles();
       this.createResizeHandles(this.selectedMesh);
 
@@ -763,6 +696,79 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
 
     return of(null);
   }
+
+  // private scaleToolHandler(event: PointerEvent, data: CustomPointerEvent): Observable<any> {
+  //   if (this.tool === 'scale' && this.resizingCorner && this.selectedMesh) {
+  //     // Текущее смещение курсора относительно старта
+  //     const dx = event.clientX - this.resizeStartMouse.x;
+  //     const dy = event.clientY - this.resizeStartMouse.y;
+
+  //     // В зависимости от угла выбираем знак масштабирования
+  //     const cornerIndex = this.resizingCorner.userData['cornerIndex'];
+
+  //     // Переводим движение мыши в изменение размера
+  //     const sx = (cornerIndex === 1 || cornerIndex === 2) ? -1 : 1;
+  //     const sy = (cornerIndex === 2 || cornerIndex === 3) ? -1 : 1;
+
+  //     // Новый scale = стартовый размер ± дельта
+  //     const geo = <THREE.PlaneGeometry>this.selectedMesh.geometry;
+
+  //     // Сохраняем пропорции
+  //     const aspect = this.resizeStartSize.x / this.resizeStartSize.y;
+
+  //     // Делаем масштабирование по X с сохранением пропорций
+  //     let newWidth = this.resizeStartSize.x + dx * sx;
+  //     newWidth = Math.max(newWidth, 1e-3); // защита от переворота
+  //     const newHeight = newWidth / aspect;
+
+  //     this.selectedMesh.scale.x = newWidth / geo.parameters.width;
+  //     this.selectedMesh.scale.y = newHeight / geo.parameters.height;
+
+  //     // Фиксируем якорь
+  //     const anchorIndex = data?.anchorIndex ?? ((cornerIndex + 2) % 4);
+  //     const anchorWorld = data?.anchor;
+
+  //     // Порядок углов тот же, что и при создании ручек:
+  //     // 0 — нижний правый (BR), 1 — нижний левый (BL), 2 — верхний левый (TL), 3 — верхний правый (TR)
+  //     if (data?.anchor) {
+  //       // Пересчитываем текущие углы рамки (они возвращаются в мировых координатах)
+  //       this.selectedMesh.updateMatrixWorld(true);
+
+  //       // Текущий якорь после скейла в ЛОКАЛЕ
+  //       const rect = this.getBoundingRectFromGeometry(this.selectedMesh);
+  //       const newCornersWorld = [
+  //         new THREE.Vector3(rect.maxX, rect.minY, rect.z),
+  //         new THREE.Vector3(rect.minX, rect.minY, rect.z),
+  //         new THREE.Vector3(rect.minX, rect.maxY, rect.z),
+  //         new THREE.Vector3(rect.maxX, rect.maxY, rect.z),
+  //       ];
+
+  //       const newAnchorWorld = newCornersWorld[data.anchorIndex].clone();
+
+  //       // Дельта в мировых координатах: куда сместился угол — исправим её
+  //       const worldDelta = data.anchor.clone().sub(newAnchorWorld); // anchorWorld - newAnchorWorld
+
+  //       // Перевести дельту в локальную систему родителя (если есть)
+  //       if (this.selectedMesh.parent) {
+  //         const parentInv = new THREE.Matrix4().copy(this.selectedMesh.parent.matrixWorld).invert();
+  //         const localDelta = worldDelta.clone().applyMatrix4(parentInv);
+
+  //         this.selectedMesh.position.add(localDelta);
+  //       } else {
+  //         // без родителя — просто в world (хотя у тебя всегда есть сцена родитель)
+  //         this.selectedMesh.position.add(worldDelta);
+  //       }
+  //     }
+
+  //     // Обновляем ручки
+  //     this.clearResizeHandles();
+  //     this.createResizeHandles(this.selectedMesh);
+
+  //     this.render();
+  //   }
+
+  //   return of(null);
+  // }
 
   private rotateToolHandler(event: PointerEvent, data: CustomPointerEvent): void {
     const rectDOM = this.renderer.domElement.getBoundingClientRect();

@@ -677,11 +677,19 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
       newWidth = Math.max(newWidth, 1e-3);
       const newHeight = newWidth / aspect;
 
+      // сохраняем знак текущего скейла (чтобы флип не сбрасывался)
+      const signX = Math.sign(this.selectedMesh.scale.x) || 1;
+      const signY = Math.sign(this.selectedMesh.scale.y) || 1;
+
       // 7. Сохраняем локальный якорь
       const anchorLocal = this.selectedMesh.worldToLocal(anchorWorld.clone());
 
-      // 8. Применяем scale
-      this.selectedMesh.scale.set(newWidth / geo.parameters.width, newHeight / geo.parameters.height, 1);
+      // 8. Применяем scale с сохранением флипа
+      this.selectedMesh.scale.set(
+        signX * (newWidth / geo.parameters.width),
+        signY * (newHeight / geo.parameters.height),
+        1
+      );
 
       // 9. После изменения scale сдвигаем меш, чтобы якорь остался на месте
       const newAnchorWorld = this.selectedMesh.localToWorld(anchorLocal.clone());
@@ -1281,6 +1289,21 @@ export class BoardComponent implements AfterViewInit, OnDestroy {
     );
 
     return angle;
+  }
+
+  private getAnchorIndexWithFlip(activeIndex: number, scale: THREE.Vector3): number {
+    const flipX = scale.x < 0;
+    const flipY = scale.y < 0;
+
+    // стандартный — диагональ
+    let anchorIndex = (activeIndex + 2) % 4;
+
+    // если флипнута только одна ось — меняем якорь на соседний
+    if (flipX !== flipY) {
+      anchorIndex = (activeIndex + (flipX ? 1 : 3)) % 4;
+    }
+
+    return anchorIndex;
   }
 
   public setTool(tool: 'move' | 'scale' | 'rotate' | 'distort', checkCurrentTool = true): void {
